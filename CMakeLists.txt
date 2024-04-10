@@ -1,0 +1,59 @@
+cmake_minimum_required(VERSION 3.20)
+
+set(ENV{CC} "mpicc")
+set(ENV{CXX} "mpicxx")
+
+project(tool_cgns2h5 LANGUAGES C CXX)
+
+# Find HDF5
+find_package(HDF5 REQUIRED COMPONENTS C HL)
+
+# Find CGNS
+find_package(CGNS REQUIRED)
+
+# Set CMake standard
+set(CMAKE_C_STANDARD 17)
+
+# Set libraries to shared
+set(LIBRARY_TYPE SHARED)
+
+# If no build type is specified, default to Release
+if(NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE Release)
+endif()
+
+# If compiler name not NVHPC or PGI, exit
+if(NOT CMAKE_C_COMPILER_ID STREQUAL "NVHPC" OR CMAKE_C_COMPILER_ID STREQUAL "PGI")
+    message(FATAL_ERROR "Compiler must be NVHPC or PGI")
+endif()
+
+# Set C/CXX flags
+set(CMAKE_C_FLAGS "-acc -cuda -Minfo=all -gpu=cc61,lineinfo,managed -lnvToolsExt")
+set(CMAKE_CXX_FLAGS "-acc -cuda -Minfo=all -gpu=cc61,lineinfo,managed -lnvToolsExt")
+# Debug flags
+set(CMAKE_C_FLAGS_DEBUG "-g -G -O0 -traceback")
+set(CMAKE_CXX_FLAGS_DEBUG "-g -G -O0 -traceback")
+# Release flags
+set(CMAKE_C_FLAGS_RELEASE "-fast")
+set(CMAKE_CXX_FLAGS_RELEASE "-fast")
+
+# use, i.e. don't skip the full RPATH for the build tree
+set(CMAKE_SKIP_BUILD_RPATH FALSE)
+
+# when building, don't use the install RPATH already
+# (but later on when installing)
+set(CMAKE_BUILD_WITH_INSTALL_RPATH FALSE)
+
+set(CMAKE_INSTALL_RPATH "${CMAKE_INSTALL_PREFIX}/lib")
+
+# add the automatically determined parts of the RPATH
+# which point to directories outside the build tree to the install RPATH
+set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
+
+# the RPATH to be used when installing, but only if it's not a system directory
+list(FIND CMAKE_PLATFORM_IMPLICIT_LINK_DIRECTORIES "${CMAKE_INSTALL_PREFIX}/lib" isSystemDir)
+if("${isSystemDir}" STREQUAL "-1")
+    set(CMAKE_INSTALL_RPATH "${CMAKE_INSTALL_PREFIX}/lib")
+endif("${isSystemDir}" STREQUAL "-1")
+
+add_subdirectory(src)
