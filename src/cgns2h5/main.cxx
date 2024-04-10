@@ -6,13 +6,139 @@
 #include <cstdio>
 #include <cstdint>
 
-// Lib headers
-#include "mpiWrap.h"
+// MPI header
+#include <mpi.h>
+
+// Parallel CGNS header
+#include <pcgnslib.h>
+
+// HDF5 headers
+#include <hdf5.h>
+#include <hdf5_hl.h>
+
+// GPU headers
+#include <cuda.h>
+#include <cuda_runtime.h>
+#include <nvToolsExt.h>
+#include <openacc.h>
 
 int main( int argc, char *argv[] )
 {
-    // Initialize MPI env
+    // Initialize MPI
+    MPI_Init( NULL, NULL );
+
+    // Set mpi_nprocs and mpi_rank
     int mpi_nprocs, mpi_rank;
-    init_MPI(mpi_nprocs, mpi_rank);
+    MPI_Comm_size( MPI_COMM_WORLD, &mpi_nprocs );
+    MPI_Comm_rank( MPI_COMM_WORLD, &mpi_rank );
+
+    // for now, support runs with only 1 process
+    if ( mpi_nprocs != 1 )
+    {
+        if ( mpi_rank == 0 )
+        {
+            std::cerr << "Error: This program only supports runs with 1 process" << std::endl;
+        }
+        MPI_Abort( MPI_COMM_WORLD, 1 );
+        return 1;
+    }
+
+    // Check if the number of arguments is correct
+    if ( argc != 3 )
+    {
+        if ( mpi_rank == 0 )
+        {
+            std::cerr << "Too few arguments!" << std::endl;
+            std::cerr << "Usage: " << argv[0] << " <input.cgns> <output.h5>" << std::endl;
+        }
+        MPI_Abort( MPI_COMM_WORLD, 1 );
+        return 1;
+    }
+
+    // Set the MPI communicator for parallel CGNS
+    cgp_mpi_comm(MPI_COMM_WORLD);
+
+    // Set input and output file names from args
+    std::string input_cgns = argv[1];
+    std::string output_h5 = argv[2];
+
+    // Use parallel CGNS to open the input file
+    int cgns_file;
+    if ( cgp_open( input_cgns.c_str(), CG_MODE_READ, &cgns_file ) != CG_OK )
+    {
+        if ( mpi_rank == 0 )
+        {
+            std::cerr << "Error: Cannot open CGNS file " << input_cgns << std::endl;
+        }
+        MPI_Abort( MPI_COMM_WORLD, 1 );
+        return 1;
+    }
+
+    // Simple version: assume 1 base with 1 zone
+    const int n_bases = 1;
+    const int idx_Base = 1;
+    const int n_zones = 1;
+    const int idx_Zone = 1;
+
+    // Get zone information
+    cgsize_t zone_size[1][3];
+    char zone_name[33];
+    if ( cg_zone_read( cgns_file, idx_Base, idx_Zone, zone_name, (cgsize_t*)zone_size ) ) {
+        if ( mpi_rank == 0 )
+        {
+            std::cerr << "Error: Cannot read zone information" << std::endl;
+        }
+        MPI_Abort( MPI_COMM_WORLD, 1 );
+        return 1;
+    }
+    int npoin = zone_size[0][0]; // Number of grid nodes
+    int nelem = zone_size[0][1]; // Number of elements
+    int nface = zone_size[0][2]; // TODO: Need better name for this
+
+    // Allocate data for the coordinates
+    float *x = new float[npoin];
+    float *y = new float[npoin];
+    float *z = new float[npoin];
+    cgsize_t irmin, irmax, istart, iend;
+
+    // Lower and upper range indexes
+    irmin = 1;
+    irmax = npoin;
+
+    // Read the coordinates using serial CGNS
+    cg_coord_read( cgns_file, idx_Base, idx_Zone, "CoordinateX",
+                   CGNS_ENUMV(RealSingle), &irmin, &irmax, x );
+    cg_coord_read( cgns_file, idx_Base, idx_Zone, "CoordinateY",
+                   CGNS_ENUMV(RealSingle), &irmin, &irmax, y );
+    cg_coord_read( cgns_file, idx_Base, idx_Zone, "CoordinateZ",
+                   CGNS_ENUMV(RealSingle), &irmin, &irmax, z );
+
+    // Get the number of sections
+    int nsections;
+    cg_nsections( cgns_file, idx_Base, idx_Zone, &nsections );
+    if ( mpi_rank == 0 ) printf("Number of sections: %d\n", nsections);
+
+    // Read the element connectivity
+    int nbound;
+    int iparent_flag;
+    char section_name[33];
+    CGNS_ENUMT(ElementType_t) itype;
+    for (int idx_sec = 1; idx_sec <= nsections; idx_sec++)
+    {
+        cg_section_read( cgns_file, idx_Base, idx_Zone, idx_sec, section_name,
+                         &itype, &istart, &iend, &nbound, &iparent_flag );
+        if ( mpi_rank == 0 )
+        {
+            printf("Section %d: %s\n", idx_sec, section_name);
+            printf("  Element type: %s\n", ElementTypeName[itype]);
+            printf("  Start: %d\n", istart);
+            printf("  End: %d\n", iend);
+            printf("  Number of bounds: %d\n", nbound);
+            printf("  Parent flag: %d\n", iparent_flag);
+        }
+    }
+
+    // Finalize MPI
+    MPI_Finalize();
     return 0;
 }
