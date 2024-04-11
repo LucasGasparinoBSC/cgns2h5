@@ -22,6 +22,9 @@
 #include <nvToolsExt.h>
 #include <openacc.h>
 
+// Element Type processor
+#include "cgnsElemInfo.h"
+
 int main( int argc, char *argv[] )
 {
     // Initialize MPI
@@ -54,6 +57,30 @@ int main( int argc, char *argv[] )
         MPI_Abort( MPI_COMM_WORLD, 1 );
         return 1;
     }
+
+    // Input should be a CGNS file
+    if ( std::string(argv[1]).find(".cgns") == std::string::npos )
+    {
+        if ( mpi_rank == 0 )
+        {
+            std::cerr << "Error: Input file should be a CGNS file" << std::endl;
+        }
+        MPI_Abort( MPI_COMM_WORLD, 1 );
+        return 1;
+    }
+
+    // Output should be an HDF5 file
+    if ( std::string(argv[2]).find(".h5") == std::string::npos )
+    {
+        if ( mpi_rank == 0 )
+        {
+            std::cerr << "Error: Output file should be an HDF5 file" << std::endl;
+        }
+        MPI_Abort( MPI_COMM_WORLD, 1 );
+        return 1;
+    }
+
+    // Reader:
 
     // Set the MPI communicator for parallel CGNS
     cgp_mpi_comm(MPI_COMM_WORLD);
@@ -122,7 +149,9 @@ int main( int argc, char *argv[] )
     int nbound;
     int iparent_flag;
     char section_name[33];
+    cgsize_t connec[nelem][27], iparent_data;
     CGNS_ENUMT(ElementType_t) itype;
+    if ( mpi_rank == 0 ) printf("Reading section data...\n");
     for (int idx_sec = 1; idx_sec <= nsections; idx_sec++)
     {
         cg_section_read( cgns_file, idx_Base, idx_Zone, idx_sec, section_name,
@@ -135,8 +164,38 @@ int main( int argc, char *argv[] )
             printf("  End: %d\n", iend);
             printf("  Number of bounds: %d\n", nbound);
             printf("  Parent flag: %d\n", iparent_flag);
+            int nnode, porder, eldim;
+            getElemInfo(itype, nnode, porder, eldim);
+        }
+        if ( itype == CGNS_ENUMV(HEXA_27) )
+        {
+            cg_elements_read( cgns_file, idx_Base, idx_Zone, idx_sec, connec[0], &iparent_data );
+            if ( mpi_rank == 0 ) printf("  Parent data: %d\n", iparent_data);
         }
     }
+
+    // Print the first 5 elements connectivity
+    if ( mpi_rank == 0 )
+    {
+        printf("First 5 elements connectivity:\n");
+        for (int i = 0; i < 5; i++)
+        {
+            printf("Element %d: ", i);
+            for (int j = 0; j < 27; j++)
+            {
+                printf("%d ", connec[i][j]);
+            }
+            printf("\n");
+        }
+    }
+
+    // Writer:
+
+    // Create a HDF5 file with parallel I/O
+    hid_t fileOut = H5Fcreate( output_h5.c_str(), H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT );
+
+    // Close the HDF5 file
+    H5Fclose( fileOut );
 
     // Finalize MPI
     MPI_Finalize();
