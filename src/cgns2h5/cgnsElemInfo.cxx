@@ -1,6 +1,11 @@
 #include "cgnsElemInfo.h"
 
-int* genQuadEdges()
+/**
+ * @brief Generate the edges of a CGNS QUAD
+ * 
+ * @return int* 
+ */
+int* cgnsQuadEdges()
 {
     static int quadEdges[4][2] = {
         {0, 1},
@@ -12,7 +17,12 @@ int* genQuadEdges()
     return *quadEdges;
 }
 
-int* genHexaEdges()
+/**
+ * @brief Generate the edges of a CGNS HEXA
+ * 
+ * @return int* 
+ */
+int* cgnsHexaEdges()
 {
     static int hexaEdges[12][2] = {
         {0, 1},
@@ -32,6 +42,24 @@ int* genHexaEdges()
     return *hexaEdges;
 }
 
+/**
+ * @brief Generate the faces of a CGNS HEXA
+ * 
+ * @return int* 
+ */
+int* cgnsHexaFaces()
+{
+    static int hexaFaces[6][4] = {
+        {0, 3, 2, 1},
+        {0, 1, 5, 4},
+        {1, 2, 6, 5},
+        {2, 3, 7, 6},
+        {0, 4, 7, 3},
+        {4, 5, 6, 7}
+    };
+
+    return *hexaFaces;
+}
 
 /**
  * @brief Get information on a specific CGNS element type

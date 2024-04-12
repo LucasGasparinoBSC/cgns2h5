@@ -102,9 +102,7 @@ int main( int argc, char *argv[] )
     }
 
     // Simple version: assume 1 base with 1 zone
-    const int n_bases = 1;
     const int idx_Base = 1;
-    const int n_zones = 1;
     const int idx_Zone = 1;
 
     // Get zone information
@@ -118,9 +116,16 @@ int main( int argc, char *argv[] )
         MPI_Abort( MPI_COMM_WORLD, 1 );
         return 1;
     }
-    int npoin = zone_size[0][0]; // Number of grid nodes
-    int nelem = zone_size[0][1]; // Number of elements
-    int nface = zone_size[0][2]; // TODO: Need better name for this
+    uint64_t npoin = zone_size[0][0]; // Number of grid nodes
+    uint64_t nelem = zone_size[0][1]; // Number of elements
+    uint64_t nface = zone_size[0][2]; // TODO: Need better name for this
+    if ( mpi_rank == 0 )
+    {
+        printf("Zone name: %s\n", zone_name);
+        printf("Number of points: %ld\n", npoin);
+        printf("Number of elements: %ld\n", nelem);
+        printf("Number of faces: %ld\n", nface);
+    }
 
     // Allocate data for the coordinates
     double *x = new double[npoin];
@@ -149,7 +154,8 @@ int main( int argc, char *argv[] )
     int nbound;
     int iparent_flag;
     char section_name[33];
-    cgsize_t connec[nelem][27], iparent_data;
+    cgsize_t* connec = new cgsize_t[nelem*1000];
+    cgsize_t iparent_data;
     CGNS_ENUMT(ElementType_t) itype;
     if ( mpi_rank == 0 ) printf("Reading section data...\n");
     for (int idx_sec = 1; idx_sec <= nsections; idx_sec++)
@@ -164,15 +170,21 @@ int main( int argc, char *argv[] )
             printf("  End: %d\n", iend);
             printf("  Number of bounds: %d\n", nbound);
             printf("  Parent flag: %d\n", iparent_flag);
-            int nnode, porder, eldim;
-            getElemInfo(itype, nnode, porder, eldim);
         }
+        // Reallocate memory based on the number of nodes
+        int nnode, porder, eldim;
+        getElemInfo(itype, nnode, porder, eldim);
+        connec = (cgsize_t*)realloc(connec, nelem*nnode*sizeof(cgsize_t));
+
         if ( itype == CGNS_ENUMV(HEXA_27) )
         {
-            cg_elements_read( cgns_file, idx_Base, idx_Zone, idx_sec, connec[0], &iparent_data );
+            cg_elements_read( cgns_file, idx_Base, idx_Zone, idx_sec, connec, &iparent_data );
             if ( mpi_rank == 0 ) printf("  Parent data: %d\n", iparent_data);
         }
     }
+
+    // Close the CGNS file
+    cgp_close( cgns_file );
 
     // Print the first 5 elements connectivity
     if ( mpi_rank == 0 )
@@ -183,7 +195,7 @@ int main( int argc, char *argv[] )
             printf("Element %d: ", i);
             for (int j = 0; j < 27; j++)
             {
-                printf("%d ", connec[i][j]);
+                printf("%d ", connec[i*27+j]);
             }
             printf("\n");
         }
@@ -196,46 +208,57 @@ int main( int argc, char *argv[] )
     herr_t status_hdf;
     fileOut = H5Fcreate( output_h5.c_str(), H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT );
 
-    // create a simple dataset of a 4x6 grid of integers
-    hsize_t dims[2];
-    dims[0] = 4;
-    dims[1] = 6;
-    int data[4][6] = {
-        {1, 2, 3, 4, 5, 6},
-        {7, 8, 9, 10, 11, 12},
-        {13, 14, 15, 16, 17, 18},
-        {19, 20, 21, 22, 23, 24}
-    };
-    hid_t dataspace_id = H5Screate_simple( 2, dims, NULL );
-    hid_t dataset_id = H5Dcreate( fileOut, "/dset", H5T_STD_I32BE, dataspace_id, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT );
+    // Create a dataset for the connectivity table
+    hsize_t dims_coord[2];
+    dims_coord[0] = nelem;
+    dims_coord[1] = 27;
 
-    status_hdf = H5Dwrite( dataset_id, H5T_NATIVE_INT, H5S_ALL, H5S_ALL, H5P_DEFAULT, data );
+    hid_t dataspace_id = H5Screate_simple( 2, dims_coord, NULL );
+    hid_t dataset_id = H5Dcreate( fileOut, "/connec", H5T_STD_I64LE, dataspace_id, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT );
 
+    // Convert CGNS connec into GMSH connec
+    // TODO: Implement the conversion
+
+    // Write the connectivity table
+    status_hdf = H5Dwrite( dataset_id, H5T_NATIVE_LLONG, H5S_ALL, H5S_ALL, H5P_DEFAULT, connec );
+    if ( status_hdf < 0 )
+    {
+        if ( mpi_rank == 0 )
+        {
+            std::cerr << "Error: Cannot write the connectivity table" << std::endl;
+        }
+        MPI_Abort( MPI_COMM_WORLD, 1 );
+        return 1;
+    }
+
+    // Destroy connec and close the dataset and dataspace
+    delete[] connec;
     status_hdf = H5Dclose( dataset_id );
     status_hdf = H5Sclose( dataspace_id );
 
-    // Create a dataset for the X, Y, Z coordinates
-    hsize_t dims_coord[2];
+    /*
+    // Create a dataset for the coordinates
     dims_coord[0] = npoin;
     dims_coord[1] = 3;
 
     dataspace_id = H5Screate_simple( 2, dims_coord, NULL );
-    dataset_id = H5Dcreate( fileOut, "coords", H5T_IEEE_F64LE, dataspace_id, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT );
+    dataset_id = H5Dcreate( fileOut, "/coord", H5T_IEEE_F64LE, dataspace_id, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT );
 
-    // Write the X, Y, Z coordinates
-    float *tmp = new float[npoin*3];
-    #pragma acc parallel loop
+    // Write the coordinates
+    double *coord = new double[npoin*3];
     for (int i = 0; i < npoin; i++)
     {
-        tmp[i*3] = x[i];
-        tmp[i*3+1] = y[i];
-        tmp[i*3+2] = z[i];
+        coord[i*3+0] = x[i];
+        coord[i*3+1] = y[i];
+        coord[i*3+2] = z[i];
     }
-    status_hdf = H5Dwrite( dataset_id, H5T_NATIVE_FLOAT, H5S_ALL, H5S_ALL, H5P_DEFAULT, tmp );
+    status_hdf = H5Dwrite( dataset_id, H5T_IEEE_F64LE, H5S_ALL, H5S_ALL, H5P_DEFAULT, coord );
 
-    // Create a new group in the root group
-    hid_t group_id = H5Gcreate( fileOut, "MyGroup", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT );
-    status_hdf = H5Gclose( group_id );
+    // Destroy coord and close the dataset and dataspace
+    delete[] coord;
+    status_hdf = H5Dclose( dataset_id );
+    status_hdf = H5Sclose( dataspace_id );
+    */
 
     // Close the HDF5 file
     status_hdf = H5Fclose( fileOut );
