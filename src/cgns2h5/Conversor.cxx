@@ -291,3 +291,16 @@ void Conversor::joinTables( int &indexDesti, int* size1, int** &table1, int* siz
         j++;
     }
 }
+
+void Conversor::convert2sod( int &pOrder, cgsize_t* &connecCGNS, cgsize_t* &connecSOD2D )
+{
+    // Generate the ijk tables for CGNS
+    int opt = 1;
+    this->cgns_QuadIndexTable = createQuadIndexTable( pOrder, opt );
+    this->cgns_HexaIndexTable = createHexaIndexTable( pOrder, opt );
+
+    // Convert the ijk tables to SOD2D
+    opt = 2;
+    this->sod2d_QuadIndexTable = createQuadIndexTable( pOrder, opt );
+    this->sod2d_HexaIndexTable = createHexaIndexTable( pOrder, opt );
+}

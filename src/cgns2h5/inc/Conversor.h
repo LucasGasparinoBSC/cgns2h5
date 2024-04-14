@@ -5,6 +5,7 @@
 #include <vector>
 #include <cstdlib>
 #include <cstdint>
+#include <pcgnslib.h>
 #include "cgnsElemInfo.h"
 
 class Conversor
@@ -68,10 +69,13 @@ class Conversor
         };
         int **cgns_QuadIndexTable;
         int **cgns_HexaIndexTable;
+        int **sod2d_QuadIndexTable;
+        int **sod2d_HexaIndexTable;
         int** createQuadIndexTable( int &mOrder, int &opt );
         int** createHexaIndexTable( int &mOrder, int &opt );
         void joinTables( int &indexDesti, int* size1, int** &table1, int* size2, int** &table2 );
     public:
+        void convert2sod( int &pOrder, cgsize_t* &connecCGNS, cgsize_t* &connecSOD2D );
 };
 
 #endif // !CONVERSOR_H_

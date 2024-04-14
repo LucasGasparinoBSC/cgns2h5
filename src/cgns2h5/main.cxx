@@ -219,9 +219,6 @@ int main( int argc, char *argv[] )
     hid_t dataspace_id = H5Screate_simple( 2, dims_coord, NULL );
     hid_t dataset_id = H5Dcreate( fileOut, "/connec", H5T_STD_I64LE, dataspace_id, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT );
 
-    // Convert CGNS connec into GMSH connec
-    // TODO: Implement the conversion
-
     // Write the connectivity table
     status_hdf = H5Dwrite( dataset_id, H5T_NATIVE_LLONG, H5S_ALL, H5S_ALL, H5P_DEFAULT, connec );
     if ( status_hdf < 0 )
