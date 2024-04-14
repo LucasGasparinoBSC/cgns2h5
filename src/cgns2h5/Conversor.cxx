@@ -18,7 +18,7 @@ int** Conversor::createHexaIndexTable( int &mOrder, int &opt )
     int **indexTable = new int*[nNodes];
     for ( int i = 0; i < nNodes; i++ )
     {
-        indexTable[i] = new int[2];
+        indexTable[i] = new int[3];
     }
 
     // Node 0
@@ -86,9 +86,11 @@ int** Conversor::createHexaIndexTable( int &mOrder, int &opt )
                     case 1:
                         i0 = cgns_HexaEdges[iedge][0];
                         i1 = cgns_HexaEdges[iedge][1];
+                        break;
                     case 2:
                         i0 = sod2d_HexaEdges[iedge][0];
                         i1 = sod2d_HexaEdges[iedge][1];
+                        break;
                 }
 
                 // Subtract the indexTable of the end nodes, normalize with mOrder
@@ -129,10 +131,12 @@ int** Conversor::createHexaIndexTable( int &mOrder, int &opt )
                         i0 = cgns_HexaFaces[iFace][0];
                         i1 = cgns_HexaFaces[iFace][1];
                         i3 = cgns_HexaFaces[iFace][3];
+                        break;
                     case 2:
                         i0 = sod2d_HexaFaces[iFace][0];
                         i1 = sod2d_HexaFaces[iFace][1];
                         i3 = sod2d_HexaFaces[iFace][3];
+                        break;
                 }
 
                 // Subtract the indexTable of the end nodes, normalize with mOrder
@@ -146,7 +150,7 @@ int** Conversor::createHexaIndexTable( int &mOrder, int &opt )
                 v[2] = (indexTable[i3][2] - indexTable[i0][2])/mOrder;
 
                 // Populate the interior of the faces
-                for ( int i = 1; i < nFaceNodes+1; i++ )
+                for ( int i = 0; i < nFaceNodes; i++ )
                 {
                     indexTable[iNode][0] = indexTable[i0][0] + u[0]*tableFace[i][0] + v[0]*tableFace[i][1];
                     indexTable[iNode][1] = indexTable[i0][1] + u[1]*tableFace[i][0] + v[1]*tableFace[i][1];
@@ -234,9 +238,11 @@ int** Conversor::createQuadIndexTable( int &mOrder, int &opt )
                     case 1:
                         i0 = cgns_QuadEdges[iedge][0];
                         i1 = cgns_QuadEdges[iedge][1];
+                        break;
                     case 2:
                         i0 = sod2d_QuadEdges[iedge][0];
                         i1 = sod2d_QuadEdges[iedge][1];
+                        break;
                 }
 
                 // Subtract the indexTable of the end nodes, normalize with mOrder
@@ -275,17 +281,6 @@ int** Conversor::createQuadIndexTable( int &mOrder, int &opt )
 
 void Conversor::joinTables( int &indexDesti, int* size1, int** &table1, int* size2, int** &table2 )
 {
-    // Print size1
-    for ( int i = 0; i < 2; i++ )
-    {
-        std::cout << size1[i] << " ";
-    }
-
-    // Print size2
-    for ( int i = 0; i < 2; i++ )
-    {
-        std::cout << size2[i] << " ";
-    }
     int j = indexDesti;
     for ( int i = 0; i < size1[0]; i++ )
     {
