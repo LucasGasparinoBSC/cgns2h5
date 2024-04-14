@@ -24,6 +24,7 @@
 
 // Element Type processor
 #include "cgnsElemInfo.h"
+#include "Conversor.h"
 
 int main( int argc, char *argv[] )
 {
@@ -200,6 +201,8 @@ int main( int argc, char *argv[] )
             printf("\n");
         }
     }
+
+    // Conversion to SO2D format:
 
     // Writer:
 

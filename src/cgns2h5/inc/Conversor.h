@@ -1,6 +1,7 @@
 #ifndef CONVERSOR_H_
 #define CONVERSOR_H_
 
+#include <iostream>
 #include <vector>
 #include <cstdlib>
 #include <cstdint>
@@ -43,7 +44,7 @@ class Conversor
             {2, 3},
             {3, 0}
         };
-        const int sod3d_HexaEdges[12][2] = {
+        const int sod2d_HexaEdges[12][2] = {
             {0, 1},
             {0, 3},
             {0, 4},
@@ -57,7 +58,7 @@ class Conversor
             {5, 6},
             {6, 7}
         };
-        const int sod3d_HexaFaces[6][4] = {
+        const int sod2d_HexaFaces[6][4] = {
             {0, 3, 2, 1},
             {0, 1, 5, 4},
             {0, 4, 7, 3},
@@ -67,7 +68,9 @@ class Conversor
         };
         int **cgns_QuadIndexTable;
         int **cgns_HexaIndexTable;
-        int** cgns_createQuadIndexTable(int &mOrder);
+        int** createQuadIndexTable( int &mOrder, int &opt );
+        int** createHexaIndexTable( int &mOrder, int &opt );
+        void joinTables( int &indexDesti, int* size1, int** &table1, int* size2, int** &table2 );
     public:
 };
 
