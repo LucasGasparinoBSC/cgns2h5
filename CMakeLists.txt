@@ -28,8 +28,8 @@ if(NOT CMAKE_C_COMPILER_ID STREQUAL "NVHPC" OR CMAKE_C_COMPILER_ID STREQUAL "PGI
 endif()
 
 # Set C/CXX flags
-set(CMAKE_C_FLAGS "-acc -cuda -Minfo=all -gpu=cc86,lineinfo,managed -lnvToolsExt")
-set(CMAKE_CXX_FLAGS "-acc -cuda -Minfo=all -gpu=cc86,lineinfo,managed -lnvToolsExt")
+set(CMAKE_C_FLAGS "-acc -cuda -Minfo=all -gpu=cc61,lineinfo,managed -lnvToolsExt")
+set(CMAKE_CXX_FLAGS "-acc -cuda -Minfo=all -gpu=cc61,lineinfo,managed -lnvToolsExt")
 # Debug flags
 set(CMAKE_C_FLAGS_DEBUG "-g -O0 -traceback")
 set(CMAKE_CXX_FLAGS_DEBUG "-g -O0 -traceback")

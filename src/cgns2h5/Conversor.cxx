@@ -292,15 +292,106 @@ void Conversor::joinTables( int &indexDesti, int* size1, int** &table1, int* siz
     }
 }
 
-void Conversor::convert2sod( int &pOrder, cgsize_t* &connecCGNS, cgsize_t* &connecSOD2D )
+int** Conversor::createQuadIJ( int &mOrder, int** &indexTable)
+{
+    // Allocate memory for the tensor
+    int **ij = new int*[mOrder+1];
+    for ( int i = 0; i < mOrder+1; i++ )
+    {
+        ij[i] = new int[mOrder+1];
+    }
+
+    // Initialize the tensor to zeros
+    for ( int i = 0; i < mOrder+1; i++ )
+    {
+        for ( int j = 0; j < mOrder+1; j++ )
+        {
+            ij[i][j] = 0;
+        }
+    }
+
+    // Fill the appropriate values
+    for ( int inode = 0; inode < (mOrder+1)*(mOrder+1); inode++ )
+    {
+        ij[indexTable[inode][0]][indexTable[inode][1]] = inode;
+    }
+
+    return ij;
+}
+
+int*** Conversor::createHexaIJK( int &mOrder, int** &indexTable )
+{
+    // Allocate memory for the tensor
+    int ***ijk = new int**[mOrder+1];
+    for ( int i = 0; i < mOrder+1; i++ )
+    {
+        ijk[i] = new int*[mOrder+1];
+        for ( int j = 0; j < mOrder+1; j++ )
+        {
+            ijk[i][j] = new int[mOrder+1];
+        }
+    }
+
+    // Initialize the tensor to zeros
+    for ( int i = 0; i < mOrder+1; i++ )
+    {
+        for ( int j = 0; j < mOrder+1; j++ )
+        {
+            for ( int k = 0; k < mOrder+1; k++ )
+            {
+                ijk[i][j][k] = 0;
+            }
+        }
+    }
+
+    // Fill the appropriate values
+    for ( int inode = 0; inode < (mOrder+1)*(mOrder+1)*(mOrder+1); inode++ )
+    {
+        ijk[indexTable[inode][0]][indexTable[inode][1]][indexTable[inode][2]] = inode;
+    }
+
+    return ijk;
+}
+
+void Conversor::convert2sod_HEXA( int &pOrder, uint64_t &nElem, int &nNode, cgsize_t* &connecCGNS, cgsize_t* &connecSOD2D )
 {
     // Generate the ijk tables for CGNS
     int opt = 1;
-    this->cgns_QuadIndexTable = createQuadIndexTable( pOrder, opt );
-    this->cgns_HexaIndexTable = createHexaIndexTable( pOrder, opt );
+    cgns_HexaIndexTable = createHexaIndexTable( pOrder, opt );
+    cgns_HexaIJK = createHexaIJK( pOrder, this->cgns_HexaIndexTable );
 
     // Convert the ijk tables to SOD2D
     opt = 2;
-    this->sod2d_QuadIndexTable = createQuadIndexTable( pOrder, opt );
-    this->sod2d_HexaIndexTable = createHexaIndexTable( pOrder, opt );
+    sod2d_HexaIndexTable =  createHexaIndexTable( pOrder, opt );
+    sod2d_HexaIJK = createHexaIJK( pOrder, this->sod2d_HexaIndexTable );
+
+    // Loop over all elements
+    cgsize_t connec[nNode];
+    cgsize_t connecConv[nNode];
+    int i;
+    int j;
+    int k;
+    int iNodeSOD2D;
+    //#pragma acc parallel loop gang private(connec, connecConv)
+    for ( uint64_t iElem = 0; iElem < nElem; iElem++ )
+    {
+
+        //#pragma acc loop vector
+        for ( int iNode = 0; iNode < nNode; iNode++ )
+        {
+            // Extract local connectivity
+            connec[iNode] = connecCGNS[iElem*nNode+iNode];
+
+            // Get the CGNS i,j,k indices for iNode
+            i = cgns_HexaIndexTable[iNode][0];
+            j = cgns_HexaIndexTable[iNode][1];
+            k = cgns_HexaIndexTable[iNode][2];
+
+            // Get the corrresponding SOD2D index
+            iNodeSOD2D = sod2d_HexaIJK[i][j][k];
+
+            connecConv[iNodeSOD2D] = connec[iNode];
+            std::cout << iNode << "," << connec[iNode] << "," << iNodeSOD2D << "," << connecConv[iNode] << std::endl;
+        }
+    }
 }

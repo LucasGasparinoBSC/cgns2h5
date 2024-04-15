@@ -158,6 +158,9 @@ int main( int argc, char *argv[] )
     cgsize_t* connec = new cgsize_t[nelem*1000];
     cgsize_t iparent_data;
     CGNS_ENUMT(ElementType_t) itype;
+    int nnode, porder, eldim;
+    cgsize_t* connecSOD2D = (cgsize_t*)malloc(nelem*nnode*sizeof(cgsize_t));
+    #pragma acc enter data create(connecSOD2D[0:nelem*nnode])
     if ( mpi_rank == 0 ) printf("Reading section data...\n");
     for (int idx_sec = 1; idx_sec <= nsections; idx_sec++)
     {
@@ -173,7 +176,6 @@ int main( int argc, char *argv[] )
             printf("  Parent flag: %d\n", iparent_flag);
         }
         // Reallocate memory based on the number of nodes
-        int nnode, porder, eldim;
         getElemInfo(itype, nnode, porder, eldim);
         connec = (cgsize_t*)realloc(connec, nelem*nnode*sizeof(cgsize_t));
 
@@ -181,6 +183,9 @@ int main( int argc, char *argv[] )
         {
             cg_elements_read( cgns_file, idx_Base, idx_Zone, idx_sec, connec, &iparent_data );
             if ( mpi_rank == 0 ) printf("  Parent data: %d\n", iparent_data);
+            // Conversion to SO2D format:
+            Conversor conv;
+            conv.convert2sod_HEXA(porder, nelem, nnode, connec, connecSOD2D);
         }
     }
 
@@ -201,8 +206,6 @@ int main( int argc, char *argv[] )
             printf("\n");
         }
     }
-
-    // Conversion to SO2D format:
 
     // Writer:
 
