@@ -128,10 +128,11 @@ int main( int argc, char *argv[] )
         printf("Number of faces: %ld\n", nface);
     }
 
-    // Allocate data for the coordinates
+    // Allocate data for the coordinates (assuming 3D)
     double *x = new double[npoin];
     double *y = new double[npoin];
     double *z = new double[npoin];
+    double *xyz = new double[npoin*3];
     cgsize_t irmin, irmax, istart, iend;
 
     // Lower and upper range indexes
@@ -140,11 +141,11 @@ int main( int argc, char *argv[] )
 
     // Read the coordinates using serial CGNS
     cg_coord_read( cgns_file, idx_Base, idx_Zone, "CoordinateX",
-                   CGNS_ENUMV(RealDouble), &irmin, &irmax, x );
+                   CGNS_ENUMV(RealDouble), &irmin, &irmax, xyz );
     cg_coord_read( cgns_file, idx_Base, idx_Zone, "CoordinateY",
-                   CGNS_ENUMV(RealDouble), &irmin, &irmax, y );
+                   CGNS_ENUMV(RealDouble), &irmin, &irmax, xyz+npoin );
     cg_coord_read( cgns_file, idx_Base, idx_Zone, "CoordinateZ",
-                   CGNS_ENUMV(RealDouble), &irmin, &irmax, z );
+                   CGNS_ENUMV(RealDouble), &irmin, &irmax, xyz+npoin*2 );
 
     // Get the number of sections
     int nsections;
@@ -152,17 +153,18 @@ int main( int argc, char *argv[] )
     if ( mpi_rank == 0 ) printf("Number of sections: %d\n", nsections);
 
     // Read the element connectivity
-    int nbound;
+    int nnode, nbound, porder, eldim;
+    int sec_dims_nnode[nsections];
     int iparent_flag;
     char section_name[33];
-    cgsize_t* connec = new cgsize_t[nelem*1000];
+    cgsize_t* connec = new cgsize_t[nelem];
     cgsize_t iparent_data;
     CGNS_ENUMT(ElementType_t) itype;
-    int nnode, porder, eldim;
-    cgsize_t* connecSOD2D = (cgsize_t*)malloc(nelem*1000*sizeof(cgsize_t));
+    cgsize_t* connecSOD2D = (cgsize_t*)malloc(nelem*sizeof(cgsize_t));
     if ( mpi_rank == 0 ) printf("Reading section data...\n");
     for (int idx_sec = 1; idx_sec <= nsections; idx_sec++)
     {
+        // Read the rection
         cg_section_read( cgns_file, idx_Base, idx_Zone, idx_sec, section_name,
                          &itype, &istart, &iend, &nbound, &iparent_flag );
         if ( mpi_rank == 0 )
@@ -174,13 +176,19 @@ int main( int argc, char *argv[] )
             printf("  Number of bounds: %d\n", nbound);
             printf("  Parent flag: %d\n", iparent_flag);
         }
+        sec_dims_nnode[idx_sec] = nnode;
+
         // Reallocate memory based on the number of nodes
         getElemInfo(itype, nnode, porder, eldim);
         connec = (cgsize_t*)realloc(connec, nelem*nnode*sizeof(cgsize_t));
         connecSOD2D = (cgsize_t*)realloc(connecSOD2D, nelem*nnode*sizeof(cgsize_t));
-        //#pragma acc enter data create(connecSOD2D[0:nelem*nnode])
 
-        if ( itype == CGNS_ENUMV(HEXA_27) )
+        // Extract the element base type, without number of nodes, to a string
+        std::string elemTypeStr = ElementTypeName[itype];
+        elemTypeStr = elemTypeStr.substr(0, elemTypeStr.find("_"));
+
+        // If the base is a HEXA, read the connectivity and convert to SOD2D
+        if ( elemTypeStr == "HEXA" )
         {
             cg_elements_read( cgns_file, idx_Base, idx_Zone, idx_sec, connec, &iparent_data );
             if ( mpi_rank == 0 ) printf("  Parent data: %d\n", iparent_data);
@@ -193,21 +201,6 @@ int main( int argc, char *argv[] )
     // Close the CGNS file
     cgp_close( cgns_file );
 
-    // Print the first 5 elements connectivity
-    if ( mpi_rank == 0 )
-    {
-        printf("First 5 elements connectivity:\n");
-        for (int i = 0; i < 5; i++)
-        {
-            printf("Element %d: ", i);
-            for (int j = 0; j < 27; j++)
-            {
-                printf("%d ", connec[i*27+j]);
-            }
-            printf("\n");
-        }
-    }
-
     // Writer:
 
     // Create a HDF5 file with parallel I/O
@@ -218,13 +211,13 @@ int main( int argc, char *argv[] )
     // Create a dataset for the connectivity table
     hsize_t dims_coord[2];
     dims_coord[0] = nelem;
-    dims_coord[1] = 27;
+    dims_coord[1] = (porder+1)*(porder+1)*(porder+1);
 
     hid_t dataspace_id = H5Screate_simple( 2, dims_coord, NULL );
     hid_t dataset_id = H5Dcreate( fileOut, "/connec", H5T_STD_I64LE, dataspace_id, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT );
 
     // Write the connectivity table
-    status_hdf = H5Dwrite( dataset_id, H5T_NATIVE_LLONG, H5S_ALL, H5S_ALL, H5P_DEFAULT, connec );
+    status_hdf = H5Dwrite( dataset_id, H5T_NATIVE_LLONG, H5S_ALL, H5S_ALL, H5P_DEFAULT, connecSOD2D );
     if ( status_hdf < 0 )
     {
         if ( mpi_rank == 0 )
@@ -240,8 +233,6 @@ int main( int argc, char *argv[] )
     status_hdf = H5Dclose( dataset_id );
     status_hdf = H5Sclose( dataspace_id );
 
-    /*
-    // Create a dataset for the coordinates
     dims_coord[0] = npoin;
     dims_coord[1] = 3;
 
@@ -249,20 +240,11 @@ int main( int argc, char *argv[] )
     dataset_id = H5Dcreate( fileOut, "/coord", H5T_IEEE_F64LE, dataspace_id, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT );
 
     // Write the coordinates
-    double *coord = new double[npoin*3];
-    for (int i = 0; i < npoin; i++)
-    {
-        coord[i*3+0] = x[i];
-        coord[i*3+1] = y[i];
-        coord[i*3+2] = z[i];
-    }
-    status_hdf = H5Dwrite( dataset_id, H5T_IEEE_F64LE, H5S_ALL, H5S_ALL, H5P_DEFAULT, coord );
+    status_hdf = H5Dwrite( dataset_id, H5T_IEEE_F64LE, H5S_ALL, H5S_ALL, H5P_DEFAULT, xyz );
 
     // Destroy coord and close the dataset and dataspace
-    delete[] coord;
     status_hdf = H5Dclose( dataset_id );
     status_hdf = H5Sclose( dataspace_id );
-    */
 
     // Close the HDF5 file
     status_hdf = H5Fclose( fileOut );
