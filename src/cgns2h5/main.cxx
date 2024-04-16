@@ -339,6 +339,9 @@ int main( int argc, char *argv[] )
     status_hdf = H5Dclose( dataset_numNodes );
     status_hdf = H5Sclose( dataspace_numNodes );
 
+    /// Cloose the group "/dims
+    status_hdf = H5Gclose( group_dims );
+
     // Close the HDF5 file
     status_hdf = H5Fclose( fileOut );
 
