@@ -372,11 +372,16 @@ void Conversor::convert2sod_HEXA( int &pOrder, uint64_t &nElem, int &nNode, cgsi
     int j;
     int k;
     int iNodeSOD2D;
-    //#pragma acc parallel loop gang private(connec, connecConv)
+    #pragma acc parallel loop gang private(connec, connecConv)
     for ( uint64_t iElem = 0; iElem < nElem; iElem++ )
     {
-
+        // Ensure connecConv is zero
         //#pragma acc loop vector
+        for ( int i = 0; i < nNode; i++ )
+        {
+            connecConv[i] = 0;
+        }
+        #pragma acc loop vector
         for ( int iNode = 0; iNode < nNode; iNode++ )
         {
             // Extract local connectivity
@@ -390,8 +395,14 @@ void Conversor::convert2sod_HEXA( int &pOrder, uint64_t &nElem, int &nNode, cgsi
             // Get the corrresponding SOD2D index
             iNodeSOD2D = sod2d_HexaIJK[i][j][k];
 
+            // Put the node on the new position
             connecConv[iNodeSOD2D] = connec[iNode];
-            std::cout << iNode << "," << connec[iNode] << "," << iNodeSOD2D << "," << connecConv[iNode] << std::endl;
+        }
+        // Add local converted connectivity to global SOD table
+        #pragma acc loop vector
+        for ( int iNode = 0; iNode < nNode; iNode++ )
+        {
+            connecSOD2D[iElem*nNode+iNode] = connecConv[iNode];
         }
     }
 }

@@ -159,8 +159,7 @@ int main( int argc, char *argv[] )
     cgsize_t iparent_data;
     CGNS_ENUMT(ElementType_t) itype;
     int nnode, porder, eldim;
-    cgsize_t* connecSOD2D = (cgsize_t*)malloc(nelem*nnode*sizeof(cgsize_t));
-    #pragma acc enter data create(connecSOD2D[0:nelem*nnode])
+    cgsize_t* connecSOD2D = (cgsize_t*)malloc(nelem*1000*sizeof(cgsize_t));
     if ( mpi_rank == 0 ) printf("Reading section data...\n");
     for (int idx_sec = 1; idx_sec <= nsections; idx_sec++)
     {
@@ -178,6 +177,8 @@ int main( int argc, char *argv[] )
         // Reallocate memory based on the number of nodes
         getElemInfo(itype, nnode, porder, eldim);
         connec = (cgsize_t*)realloc(connec, nelem*nnode*sizeof(cgsize_t));
+        connecSOD2D = (cgsize_t*)realloc(connecSOD2D, nelem*nnode*sizeof(cgsize_t));
+        //#pragma acc enter data create(connecSOD2D[0:nelem*nnode])
 
         if ( itype == CGNS_ENUMV(HEXA_27) )
         {

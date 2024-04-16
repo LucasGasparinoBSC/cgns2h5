@@ -5,6 +5,7 @@
 #include <vector>
 #include <cstdlib>
 #include <cstdint>
+#include <cstdio>
 #include <pcgnslib.h>
 #include "cgnsElemInfo.h"
 
