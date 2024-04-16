@@ -208,6 +208,29 @@ int main( int argc, char *argv[] )
     herr_t status_hdf;
     fileOut = H5Fcreate( output_h5.c_str(), H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT );
 
+    // Create an empty dataset for boundFaces
+    hsize_t dims_bound[2];
+    dims_bound[0] = 0;
+    dims_bound[1] = 0;
+
+    hid_t dataspace_bound = H5Screate_simple( 2, dims_bound, NULL );
+    hid_t dataset_bound = H5Dcreate( fileOut, "/boundFaces", H5T_STD_I64LE, dataspace_bound, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT );
+
+    // Create an empty dataset for boundFacesId
+    hsize_t dims_boundId[1];
+    dims_boundId[0] = 0;
+
+    hid_t dataspace_boundId = H5Screate_simple( 1, dims_boundId, NULL );
+    hid_t dataset_boundId = H5Dcreate( fileOut, "/boundFacesId", H5T_STD_I64LE, dataspace_boundId, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT );
+
+    // Close the dataset and dataspace
+    status_hdf = H5Dclose( dataset_bound );
+    status_hdf = H5Sclose( dataspace_bound );
+
+    // Close the dataset and dataspace
+    status_hdf = H5Dclose( dataset_bound );
+    status_hdf = H5Sclose( dataspace_bound );
+
     // Create a dataset for the connectivity table
     hsize_t dims_coord[2];
     dims_coord[0] = nelem;
@@ -241,10 +264,80 @@ int main( int argc, char *argv[] )
 
     // Write the coordinates
     status_hdf = H5Dwrite( dataset_id, H5T_IEEE_F64LE, H5S_ALL, H5S_ALL, H5P_DEFAULT, xyz );
+    if ( status_hdf < 0 )
+    {
+        if ( mpi_rank == 0 )
+        {
+            std::cerr << "Error: Cannot write the coordinates" << std::endl;
+        }
+        MPI_Abort( MPI_COMM_WORLD, 1 );
+        return 1;
+    }
 
     // Destroy coord and close the dataset and dataspace
     status_hdf = H5Dclose( dataset_id );
     status_hdf = H5Sclose( dataspace_id );
+
+    // From "/", create the group "/dims"
+    hid_t group_dims = H5Gcreate( fileOut, "/dims", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT );
+
+    // Create the dataset "/dims/numBoundaryFaces"
+    hsize_t dims_numBound[1];
+    dims_numBound[0] = 1;
+
+    hid_t dataspace_numBound = H5Screate_simple( 1, dims_numBound, NULL );
+    hid_t dataset_numBound = H5Dcreate( fileOut, "/dims/numBoundaryFaces", H5T_STD_I64LE, dataspace_numBound, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT );
+
+    // Write the number of boundary faces
+    int numBound = 0;
+    status_hdf = H5Dwrite( dataset_numBound, H5T_STD_I64LE, H5S_ALL, H5S_ALL, H5P_DEFAULT, &numBound );
+
+    // Close the dataset and dataspace
+    status_hdf = H5Dclose( dataset_numBound );
+    status_hdf = H5Sclose( dataspace_numBound );
+
+    // Create the dataset "/dims/numElements"
+    hsize_t dims_numElem[1];
+    dims_numElem[0] = 1;
+
+    hid_t dataspace_numElem = H5Screate_simple( 1, dims_numElem, NULL );
+    hid_t dataset_numElem = H5Dcreate( fileOut, "/dims/numElements", H5T_STD_I64LE, dataspace_numElem, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT );
+
+    // Write the number of elements
+    status_hdf = H5Dwrite( dataset_numElem, H5T_STD_I64LE, H5S_ALL, H5S_ALL, H5P_DEFAULT, &nelem );
+
+    // Close the dataset and dataspace
+    status_hdf = H5Dclose( dataset_numElem );
+    status_hdf = H5Sclose( dataspace_numElem );
+
+    // Create the dataset "/dims/numMappedFaces"
+    hsize_t dims_numMapFace[1];
+    dims_numMapFace[0] = 1;
+
+    hid_t dataspace_numMapFace = H5Screate_simple( 1, dims_numMapFace, NULL );
+    hid_t dataset_numMapFace = H5Dcreate( fileOut, "/dims/numMappedFaces", H5T_STD_I64LE, dataspace_numMapFace, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT );
+
+    // Write the number of mapped faces
+    int numMapFace = 0;
+    status_hdf = H5Dwrite( dataset_numMapFace, H5T_STD_I64LE, H5S_ALL, H5S_ALL, H5P_DEFAULT, &numMapFace );
+
+    // Close the dataset and dataspace
+    status_hdf = H5Dclose( dataset_numMapFace );
+    status_hdf = H5Sclose( dataspace_numMapFace );
+
+    // Create the dataset "/dims/numNodes"
+    hsize_t dims_numNodes[1];
+    dims_numNodes[0] = 1;
+
+    hid_t dataspace_numNodes = H5Screate_simple( 1, dims_numNodes, NULL );
+    hid_t dataset_numNodes = H5Dcreate( fileOut, "/dims/numNodes", H5T_STD_I64LE, dataspace_numNodes, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT );
+
+    // Write the number of nodes
+    status_hdf = H5Dwrite( dataset_numNodes, H5T_STD_I64LE, H5S_ALL, H5S_ALL, H5P_DEFAULT, &npoin );
+
+    // Close the dataset and dataspace
+    status_hdf = H5Dclose( dataset_numNodes );
+    status_hdf = H5Sclose( dataspace_numNodes );
 
     // Close the HDF5 file
     status_hdf = H5Fclose( fileOut );
