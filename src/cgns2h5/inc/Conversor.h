@@ -70,7 +70,7 @@ class Conversor
         };
         int **cgns_QuadIndexTable;
         int **cgns_HexaIndexTable;
-        int ***cgns_QuadIJ;
+        int **cgns_QuadIJ;
         int ***cgns_HexaIJK;
         int **sod2d_QuadIndexTable;
         int **sod2d_HexaIndexTable;
@@ -82,6 +82,11 @@ class Conversor
         int*** createHexaIJK( int &mOrder, int** &indexTable );
         void joinTables( int &indexDesti, int* size1, int** &table1, int* size2, int** &table2 );
     public:
+        // Empty constructor
+        Conversor();
+        // Destructor
+        ~Conversor();
+        void convert2sod_QUAD( int &pOrder, uint64_t &nElem, int &nNode, cgsize_t* &connecBoundCGNS, cgsize_t* &connecBoundSOD2D );
         void convert2sod_HEXA( int &pOrder, uint64_t &nElem, int &nNode, cgsize_t* &connecCGNS, cgsize_t* &connecSOD2D );
 };
 

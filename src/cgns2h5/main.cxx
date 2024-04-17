@@ -25,6 +25,7 @@
 // Element Type processor
 #include "cgnsElemInfo.h"
 #include "Conversor.h"
+#include "H5Writer.h"
 
 int main( int argc, char *argv[] )
 {
@@ -129,9 +130,6 @@ int main( int argc, char *argv[] )
     }
 
     // Allocate data for the coordinates (assuming 3D)
-    double *x = new double[npoin];
-    double *y = new double[npoin];
-    double *z = new double[npoin];
     double *xyz = new double[npoin*3];
     cgsize_t irmin, irmax, istart, iend;
 
@@ -152,14 +150,139 @@ int main( int argc, char *argv[] )
     cg_nsections( cgns_file, idx_Base, idx_Zone, &nsections );
     if ( mpi_rank == 0 ) printf("Number of sections: %d\n", nsections);
 
+    // Extract basic info from each section
+    int nnode_sec[nsections];             // Nodes/elem. in each section
+    uint64_t nelem_sec[nsections];        // Number of elements in each section
+    uint64_t nbelem_sec[nsections];       // Boundary elem. iin each section
+    cgsize_t elemStartEnd[nsections][2];  // Element start and end in each section
+    cgsize_t belemStartEnd[nsections][2]; // Boundary elem. start and end in each section
+    int ibound;                           // Boundary index
+    int snode, nnode, nbnode, porder, eldim;     // Element info
+    int nbound = 0;                       // Total number of physical boundaries
+    uint64_t nbelem = 0;                  // Total number of boundary elements
+    CGNS_ENUMT(ElementType_t) itype;
+    int iparent_flag;
+
+    for ( int indx_sec = 1; indx_sec <= nsections; indx_sec++ )
+    {
+        // Read the section
+        char section_name[33];
+        cg_section_read( cgns_file, idx_Base, idx_Zone, indx_sec, section_name,
+                         &itype, &istart, &iend, &ibound, &iparent_flag );
+        if ( mpi_rank == 0 )
+        {
+            printf("Section %d: %s\n", indx_sec, section_name);
+            printf("  Element type: %s\n", ElementTypeName[itype]);
+            printf("  Number of bounds: %d\n", ibound);
+        }
+
+        // Get elem base type
+        std::string elemTypeStr = ElementTypeName[itype];
+        elemTypeStr = elemTypeStr.substr(0, elemTypeStr.find("_"));
+
+        // Get element info
+        getElemInfo(itype, snode, porder, eldim);
+        nnode_sec[indx_sec-1] = snode;
+
+        // Based on the element type,  fill section info
+        if ( elemTypeStr == "QUAD" )
+        {
+            belemStartEnd[indx_sec-1][0] = istart;
+            belemStartEnd[indx_sec-1][1] = iend;
+            nbelem += iend - istart + 1;
+            nbelem_sec[indx_sec-1] = iend - istart + 1;
+            nbound++;
+            nbnode = snode;
+            elemStartEnd[indx_sec-1][0] = 0;
+            elemStartEnd[indx_sec-1][1] = 0;
+            nelem_sec[indx_sec-1] = 0;
+        }
+        else if ( elemTypeStr == "HEXA" )
+        {
+            belemStartEnd[indx_sec-1][0] = 0;
+            belemStartEnd[indx_sec-1][1] = 0;
+            nbelem_sec[indx_sec-1] = 0;
+            elemStartEnd[indx_sec-1][0] = istart;
+            elemStartEnd[indx_sec-1][1] = iend;
+            nelem_sec[indx_sec-1] = iend - istart + 1;
+            nnode = snode;
+        }
+
+        // Print section info
+        if ( mpi_rank == 0 )
+        {
+            printf("  Number of nodes: %d\n", nnode_sec[indx_sec-1]);
+            printf("  Polynomial order: %d\n", porder);
+            printf("  Element dimension: %d\n", eldim);
+            printf("  Boundary info:\n");
+            printf("    Start: %d, End: %d\n", belemStartEnd[indx_sec-1][0], belemStartEnd[indx_sec-1][1]);
+            printf("    Number of boundary elements: %ld\n", nbelem_sec[indx_sec-1]);
+            printf("  Element info:\n");
+            printf("    Start: %d, End: %d\n", elemStartEnd[indx_sec-1][0], elemStartEnd[indx_sec-1][1]);
+            printf("    Number of elements: %ld\n", nelem_sec[indx_sec-1]);
+        }
+    }
+
+    printf("Total number of physical boundaries: %d\n", nbound);
+    printf("Total number of boundary elements: %ld\n", nbelem);
+
+    // Read the connectivities
+    std::vector<cgsize_t> connecQUAD;
+    std::vector<cgsize_t> connecHEXA;
+
+    // Loop through the sections
+    for ( int idx_sec = 1; idx_sec <= nsections; idx_sec++ )
+    {
+        // Read the section
+        char section_name[33];
+        cg_section_read( cgns_file, idx_Base, idx_Zone, idx_sec, section_name,
+                         &itype, &istart, &iend, &nbound, &iparent_flag );
+
+        // Get elem base type
+        std::string elemTypeStr = ElementTypeName[itype];
+        elemTypeStr = elemTypeStr.substr(0, elemTypeStr.find("_"));
+
+        // Read the connectivity
+        if ( elemTypeStr == "QUAD" )
+        {
+            // Allocate memory for the boundary connectivity
+            cgsize_t* connecBound = new cgsize_t[nbelem_sec[idx_sec-1]*nnode_sec[idx_sec-1]];
+
+            // Read the boundary elements
+            cg_elements_read( cgns_file, idx_Base, idx_Zone, idx_sec, connecBound, &iparent_flag );
+
+            // Append to the vector
+            for ( int idx = 0; idx < nbelem_sec[idx_sec-1]*nnode_sec[idx_sec-1]; idx++ )
+            {
+                connecQUAD.push_back(connecBound[idx]);
+            }
+
+            // Free memory
+            delete[] connecBound;
+        }
+        else if ( elemTypeStr == "HEXA" )
+        {
+            // Allocate memory for the boundary connectivity
+            cgsize_t* connecElem = new cgsize_t[nelem_sec[idx_sec-1]*nnode_sec[idx_sec-1]];
+
+            // Read the boundary elements
+            cg_elements_read( cgns_file, idx_Base, idx_Zone, idx_sec, connecElem, &iparent_flag );
+
+            // Append to the vector
+            for ( int idx = 0; idx < nelem_sec[idx_sec-1]*nnode_sec[idx_sec-1]; idx
+
+    /*
     // Read the element connectivity
     int nnode, nbound, porder, eldim;
     int sec_dims_nnode[nsections];
     int iparent_flag;
     char section_name[33];
-    cgsize_t* connec = new cgsize_t[nelem];
+    uint64_t nbelem;
     cgsize_t iparent_data;
     CGNS_ENUMT(ElementType_t) itype;
+    cgsize_t* connecBound;
+    cgsize_t* connecBoundSOD2D;
+    cgsize_t* connec = new cgsize_t[nelem];
     cgsize_t* connecSOD2D = (cgsize_t*)malloc(nelem*sizeof(cgsize_t));
     if ( mpi_rank == 0 ) printf("Reading section data...\n");
     for (int idx_sec = 1; idx_sec <= nsections; idx_sec++)
@@ -180,6 +303,9 @@ int main( int argc, char *argv[] )
 
         // Reallocate memory based on the number of nodes
         getElemInfo(itype, nnode, porder, eldim);
+        printf("  Number of nodes: %d\n", nnode);
+        printf("  Polynomial order: %d\n", porder);
+        printf("  Element dimension: %d\n", eldim);
         connec = (cgsize_t*)realloc(connec, nelem*nnode*sizeof(cgsize_t));
         connecSOD2D = (cgsize_t*)realloc(connecSOD2D, nelem*nnode*sizeof(cgsize_t));
 
@@ -191,12 +317,32 @@ int main( int argc, char *argv[] )
         if ( elemTypeStr == "HEXA" )
         {
             cg_elements_read( cgns_file, idx_Base, idx_Zone, idx_sec, connec, &iparent_data );
-            if ( mpi_rank == 0 ) printf("  Parent data: %d\n", iparent_data);
+
             // Conversion to SO2D format:
             Conversor conv;
             conv.convert2sod_HEXA(porder, nelem, nnode, connec, connecSOD2D);
         }
+
+        // If the base is a QUAD, read the boundary connectivity and convert to SOD2D
+        if ( elemTypeStr == "QUAD" )
+        {
+            // From start and end, get the number of elements
+            nbelem = iend - istart + 1;
+            if ( mpi_rank == 0 ) printf("  Number of b_elements: %d\n", nbelem);
+
+            // Allocate memory for the boundary connectivity
+            connecBound = new cgsize_t[nbelem*nnode];
+            connecBoundSOD2D = new cgsize_t[nbelem*nnode];
+
+            // Read the boundary elements
+            cg_elements_read( cgns_file, idx_Base, idx_Zone, idx_sec, connecBound, &iparent_data );
+
+            // Conversion to SOD2D format:
+            Conversor conv;
+            conv.convert2sod_QUAD(porder, nbelem, nnode, connecBound, connecBoundSOD2D);
+        }
     }
+    */
 
     // Close the CGNS file
     cgp_close( cgns_file );
@@ -208,6 +354,7 @@ int main( int argc, char *argv[] )
     herr_t status_hdf;
     fileOut = H5Fcreate( output_h5.c_str(), H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT );
 
+    /*
     // Create an empty dataset for boundFaces
     hsize_t dims_bound[2];
     dims_bound[0] = 0;
@@ -340,7 +487,8 @@ int main( int argc, char *argv[] )
     status_hdf = H5Sclose( dataspace_numNodes );
 
     /// Cloose the group "/dims
-    status_hdf = H5Gclose( group_dims );
+    status_hdf = H5Gclose( group_dims )
+    */
 
     // Close the HDF5 file
     status_hdf = H5Fclose( fileOut );

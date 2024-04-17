@@ -5,6 +5,7 @@
 #include <hdf5_hl.h>
 #include <cstdint>
 #include <string>
+#include <pcgnslib.h>
 
 class H5Writer
 {
@@ -24,14 +25,17 @@ class H5Writer
         // Close the current group, with method chaining
         H5Writer& closeGroup();
         // Write a H5T_STD_I64LE dataset, with method chaining
-        H5Writer& writeDataset(std::string datasetName, uint64_t* data, int &rank, hsize_t* dims);
+        H5Writer& writeDataset_INT(std::string datasetName, int64_t* data, int &rank, hsize_t* dims);
         // Write a H5T_IEEE_F64LE dataset, with method chaining
-        H5Writer& writeDataset(std::string datasetName, double* data, int &rank, hsize_t* dims);
+        H5Writer& writeDataset_REAL(std::string datasetName, double* data, int &rank, hsize_t* dims);
     public:
         // Constructor
         H5Writer(std::string fileName);
         // Destructor
         ~H5Writer();
+        // Write the SOD2D file
+        void writeSOD2D( uint64_t &nElem, uint64_t &nBelem, uint64_t &nPoin, int &nNode, int &pOrder,
+                         cgsize_t** &connecSOD2D, uint64_t** &connecBoundSOD2D, double* &coordSOD2D );
 };
 
 #endif //! H5WRITER_H_

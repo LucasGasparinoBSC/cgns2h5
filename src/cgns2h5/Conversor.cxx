@@ -1,5 +1,15 @@
 #include "Conversor.h"
 
+// Empty constructor
+Conversor::Conversor()
+{
+}
+
+// Destructor
+Conversor::~Conversor()
+{
+}
+
 /**
  * @brief Generates the index table for a CGNS quad element
  *
@@ -353,6 +363,56 @@ int*** Conversor::createHexaIJK( int &mOrder, int** &indexTable )
     return ijk;
 }
 
+void Conversor::convert2sod_QUAD( int &pOrder, uint64_t &nElem, int &nNode, cgsize_t* &connecBoundCGNS, cgsize_t* &connecBoundSOD2D )
+{
+    int opt = 1;
+    cgns_QuadIndexTable = createQuadIndexTable( pOrder, opt );
+    cgns_QuadIJ = createQuadIJ( pOrder, this->cgns_QuadIndexTable );
+
+    opt = 2;
+    sod2d_QuadIndexTable = createQuadIndexTable( pOrder, opt );
+    sod2d_QuadIJ = createQuadIJ( pOrder, this->sod2d_QuadIndexTable );
+
+    // Loop over all elements
+    cgsize_t connec[nNode];
+    cgsize_t connecConv[nNode];
+    int i;
+    int j;
+    int iNodeSOD2D;
+    #pragma acc parallel loop gang private(connec, connecConv)
+    for ( uint64_t iElem = 0; iElem < nElem; iElem++ )
+    {
+        // Ensure connecConv is zero
+        #pragma acc loop vector
+        for ( int i = 0; i < nNode; i++ )
+        {
+            connecConv[i] = 0;
+        }
+        #pragma acc loop vector
+        for ( int iNode = 0; iNode < nNode; iNode++ )
+        {
+            // Extract local connectivity
+            connec[iNode] = connecBoundCGNS[iElem*nNode+iNode];
+
+            // Get the CGNS i,j indices for iNode
+            i = cgns_QuadIndexTable[iNode][0];
+            j = cgns_QuadIndexTable[iNode][1];
+
+            // Get the corrresponding SOD2D index
+            iNodeSOD2D = sod2d_QuadIJ[i][j];
+
+            // Put the node on the new position
+            connecConv[iNodeSOD2D] = connec[iNode];
+        }
+        // Add local converted connectivity to global SOD table
+        #pragma acc loop vector
+        for ( int iNode = 0; iNode < nNode; iNode++ )
+        {
+            connecBoundSOD2D[iElem*nNode+iNode] = connecConv[iNode];
+        }
+    }
+}
+
 void Conversor::convert2sod_HEXA( int &pOrder, uint64_t &nElem, int &nNode, cgsize_t* &connecCGNS, cgsize_t* &connecSOD2D )
 {
     // Generate the ijk tables for CGNS
@@ -376,7 +436,7 @@ void Conversor::convert2sod_HEXA( int &pOrder, uint64_t &nElem, int &nNode, cgsi
     for ( uint64_t iElem = 0; iElem < nElem; iElem++ )
     {
         // Ensure connecConv is zero
-        //#pragma acc loop vector
+        #pragma acc loop vector
         for ( int i = 0; i < nNode; i++ )
         {
             connecConv[i] = 0;
