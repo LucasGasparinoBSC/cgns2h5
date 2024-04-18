@@ -402,6 +402,20 @@ int main( int argc, char *argv[] )
     status_hdf = H5Dclose( dataset );
     status_hdf = H5Sclose( dataspace );
 
+    // Create a dataset for the nodes per element
+    data1d[0] = 1;
+
+    dataspace = H5Screate_simple( 1, data1d, NULL );
+    dataset = H5Dcreate( fileOut, "/dims/numNodes", H5T_STD_I64LE, dataspace, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT );
+
+    // Write the nodes per element
+    uint64_t numNodes = nnode_sec[0];
+    status_hdf = H5Dwrite( dataset, H5T_NATIVE_LLONG, H5S_ALL, H5S_ALL, H5P_DEFAULT, &numNodes );
+
+    // Close the dataset and dataspace
+    status_hdf = H5Dclose( dataset );
+    status_hdf = H5Sclose( dataspace );
+
     // Create a dataset for the number of periodic faces
     dataspace = H5Screate_simple( 1, data1d, NULL );
     dataset = H5Dcreate( fileOut, "/dims/numPeriodicFaces", H5T_STD_I64LE, dataspace, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT );
