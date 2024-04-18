@@ -326,7 +326,7 @@ int main( int argc, char *argv[] )
     data1d[0] = nbelem;
 
     dataspace = H5Screate_simple( 1, data1d, NULL );
-    dataset = H5Dcreate( fileOut, "/boundFacesID", H5T_STD_I64LE, dataspace, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT );
+    dataset = H5Dcreate( fileOut, "/boundFacesId", H5T_STD_I64LE, dataspace, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT );
 
     // Write the boundary element ID
     status_hdf = H5Dwrite( dataset, H5T_NATIVE_LLONG, H5S_ALL, H5S_ALL, H5P_DEFAULT, belemId );
