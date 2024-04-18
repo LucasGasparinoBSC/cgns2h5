@@ -193,6 +193,7 @@ int main( int argc, char *argv[] )
             nbelem_sec[indx_sec-1] = iend - istart + 1;
             nbound++;
             nbnode = snode;
+            nnode_sec[indx_sec-1] = nbnode;
             elemStartEnd[indx_sec-1][0] = 0;
             elemStartEnd[indx_sec-1][1] = 0;
             nelem_sec[indx_sec-1] = 0;
@@ -206,6 +207,7 @@ int main( int argc, char *argv[] )
             elemStartEnd[indx_sec-1][1] = iend;
             nelem_sec[indx_sec-1] = iend - istart + 1;
             nnode = snode;
+            nnode_sec[indx_sec-1] = nnode;
         }
 
         // Print section info
@@ -226,123 +228,70 @@ int main( int argc, char *argv[] )
     printf("Total number of physical boundaries: %d\n", nbound);
     printf("Total number of boundary elements: %ld\n", nbelem);
 
-    // Read the connectivities
-    std::vector<cgsize_t> connecQUAD;
-    std::vector<cgsize_t> connecHEXA;
+    // Get the HEXA connectivity (only works for Xevi cases, asssumes 1st section is HEXA)
+    std::cout << "Reading HEXA connectivity..." << std::endl;
 
-    // Loop through the sections
-    for ( int idx_sec = 1; idx_sec <= nsections; idx_sec++ )
-    {
-        // Read the section
-        char section_name[33];
-        cg_section_read( cgns_file, idx_Base, idx_Zone, idx_sec, section_name,
-                         &itype, &istart, &iend, &nbound, &iparent_flag );
-
-        // Get elem base type
-        std::string elemTypeStr = ElementTypeName[itype];
-        elemTypeStr = elemTypeStr.substr(0, elemTypeStr.find("_"));
-
-        // Read the connectivity
-        if ( elemTypeStr == "QUAD" )
-        {
-            // Allocate memory for the boundary connectivity
-            cgsize_t* connecBound = new cgsize_t[nbelem_sec[idx_sec-1]*nnode_sec[idx_sec-1]];
-
-            // Read the boundary elements
-            cg_elements_read( cgns_file, idx_Base, idx_Zone, idx_sec, connecBound, &iparent_flag );
-
-            // Append to the vector
-            for ( int idx = 0; idx < nbelem_sec[idx_sec-1]*nnode_sec[idx_sec-1]; idx++ )
-            {
-                connecQUAD.push_back(connecBound[idx]);
-            }
-
-            // Free memory
-            delete[] connecBound;
-        }
-        else if ( elemTypeStr == "HEXA" )
-        {
-            // Allocate memory for the boundary connectivity
-            cgsize_t* connecElem = new cgsize_t[nelem_sec[idx_sec-1]*nnode_sec[idx_sec-1]];
-
-            // Read the boundary elements
-            cg_elements_read( cgns_file, idx_Base, idx_Zone, idx_sec, connecElem, &iparent_flag );
-
-            // Append to the vector
-            for ( int idx = 0; idx < nelem_sec[idx_sec-1]*nnode_sec[idx_sec-1]; idx
-
-    /*
-    // Read the element connectivity
-    int nnode, nbound, porder, eldim;
-    int sec_dims_nnode[nsections];
-    int iparent_flag;
-    char section_name[33];
-    uint64_t nbelem;
+    // Allocate data for the connectivity table
     cgsize_t iparent_data;
-    CGNS_ENUMT(ElementType_t) itype;
-    cgsize_t* connecBound;
-    cgsize_t* connecBoundSOD2D;
-    cgsize_t* connec = new cgsize_t[nelem];
-    cgsize_t* connecSOD2D = (cgsize_t*)malloc(nelem*sizeof(cgsize_t));
-    if ( mpi_rank == 0 ) printf("Reading section data...\n");
-    for (int idx_sec = 1; idx_sec <= nsections; idx_sec++)
+    cgsize_t *connecHEXA = new cgsize_t[nelem*nnode];
+
+    // Read the connectivity
+    cg_elements_read( cgns_file, idx_Base, idx_Zone, 1, connecHEXA, &iparent_data );
+
+    // Convert to SOD format
+    Conversor conv;
+    cgsize_t *connecHEXA_SOD = new cgsize_t[nelem*nnode];
+    memset( connecHEXA_SOD, 0, nelem*nnode*sizeof(cgsize_t) );
+    std::cout << "Converting HEXA connectivity to SOD format..." << std::endl;
+    conv.convert2sod_HEXA( porder, nelem, nnode, connecHEXA, connecHEXA_SOD );
+
+    // Free the original connectivity
+    delete[] connecHEXA;
+
+    // Remaining sections are BCs, read them. Also crreate belemId array
+    std::cout << "Reading boundary element connectivity..." << std::endl;
+
+    istart = 0;
+    cgsize_t *connecQUAD = new cgsize_t[nbelem*nbnode]; // Total BC connectivity
+    uint64_t *belemId = new uint64_t[nbelem];           // Boundary element ID
+
+    for ( int idx_sec = 2; idx_sec <= nsections; idx_sec++ )
     {
-        // Read the rection
-        cg_section_read( cgns_file, idx_Base, idx_Zone, idx_sec, section_name,
-                         &itype, &istart, &iend, &nbound, &iparent_flag );
-        if ( mpi_rank == 0 )
+        printf("Reading section %d ...\n", idx_sec);
+        // belemId is simply idxSec-1
+        for ( int i = istart; i < istart+nbelem_sec[idx_sec-1]; i++ )
         {
-            printf("Section %d: %s\n", idx_sec, section_name);
-            printf("  Element type: %s\n", ElementTypeName[itype]);
-            printf("  Start: %d\n", istart);
-            printf("  End: %d\n", iend);
-            printf("  Number of bounds: %d\n", nbound);
-            printf("  Parent flag: %d\n", iparent_flag);
-        }
-        sec_dims_nnode[idx_sec] = nnode;
-
-        // Reallocate memory based on the number of nodes
-        getElemInfo(itype, nnode, porder, eldim);
-        printf("  Number of nodes: %d\n", nnode);
-        printf("  Polynomial order: %d\n", porder);
-        printf("  Element dimension: %d\n", eldim);
-        connec = (cgsize_t*)realloc(connec, nelem*nnode*sizeof(cgsize_t));
-        connecSOD2D = (cgsize_t*)realloc(connecSOD2D, nelem*nnode*sizeof(cgsize_t));
-
-        // Extract the element base type, without number of nodes, to a string
-        std::string elemTypeStr = ElementTypeName[itype];
-        elemTypeStr = elemTypeStr.substr(0, elemTypeStr.find("_"));
-
-        // If the base is a HEXA, read the connectivity and convert to SOD2D
-        if ( elemTypeStr == "HEXA" )
-        {
-            cg_elements_read( cgns_file, idx_Base, idx_Zone, idx_sec, connec, &iparent_data );
-
-            // Conversion to SO2D format:
-            Conversor conv;
-            conv.convert2sod_HEXA(porder, nelem, nnode, connec, connecSOD2D);
+            belemId[i] = idx_sec-1;
         }
 
-        // If the base is a QUAD, read the boundary connectivity and convert to SOD2D
-        if ( elemTypeStr == "QUAD" )
+        // Alloc. a buffer for the current BC connectivity
+        cgsize_t *connecQUAD_sec = new cgsize_t[nbelem_sec[idx_sec-1]*nbnode];
+
+        // Read the connectivity into the buffer
+        cg_elements_read( cgns_file, idx_Base, idx_Zone, idx_sec, connecQUAD_sec, &iparent_data );
+
+        // Copy to the total BC connectivity
+        for ( int i = 0; i < nbelem_sec[idx_sec-1]; i++ )
         {
-            // From start and end, get the number of elements
-            nbelem = iend - istart + 1;
-            if ( mpi_rank == 0 ) printf("  Number of b_elements: %d\n", nbelem);
-
-            // Allocate memory for the boundary connectivity
-            connecBound = new cgsize_t[nbelem*nnode];
-            connecBoundSOD2D = new cgsize_t[nbelem*nnode];
-
-            // Read the boundary elements
-            cg_elements_read( cgns_file, idx_Base, idx_Zone, idx_sec, connecBound, &iparent_data );
-
-            // Conversion to SOD2D format:
-            Conversor conv;
-            conv.convert2sod_QUAD(porder, nbelem, nnode, connecBound, connecBoundSOD2D);
+            for ( int j = 0; j < nbnode; j++ )
+            {
+                connecQUAD[(istart+i)*nbnode+j] = connecQUAD_sec[i*nbnode+j];
+            }
         }
+        istart += nbelem_sec[idx_sec-1];
+
+        // Free the buffer
+        delete[] connecQUAD_sec;
     }
-    */
+
+    // Convert to SOD format
+    cgsize_t *connecQUAD_SOD = new cgsize_t[nbelem*nbnode];
+    memset( connecQUAD_SOD, 0, nbelem*nbnode*sizeof(cgsize_t) );
+    std::cout << "Converting QUAD connectivity to SOD format..." << std::endl;
+    conv.convert2sod_QUAD( porder, nbelem, nbnode, connecQUAD, connecQUAD_SOD );
+
+    // Free the original connectivity
+    delete[] connecQUAD;
 
     // Close the CGNS file
     cgp_close( cgns_file );
@@ -351,144 +300,196 @@ int main( int argc, char *argv[] )
 
     // Create a HDF5 file with parallel I/O
     hid_t fileOut;
-    herr_t status_hdf;
     fileOut = H5Fcreate( output_h5.c_str(), H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT );
 
-    /*
-    // Create an empty dataset for boundFaces
-    hsize_t dims_bound[2];
-    dims_bound[0] = 0;
-    dims_bound[1] = 0;
+    // Basic hdf5 variables
+    hid_t dataspace, dataset, group;
+    herr_t status_hdf;
+    hsize_t data1d[1];
+    hsize_t data2d[2];
 
-    hid_t dataspace_bound = H5Screate_simple( 2, dims_bound, NULL );
-    hid_t dataset_bound = H5Dcreate( fileOut, "/boundFaces", H5T_STD_I64LE, dataspace_bound, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT );
+    // Create a dataset for the bounndary connectivity table
+    data2d[0] = nbelem;
+    data2d[1] = nbnode;
 
-    // Create an empty dataset for boundFacesId
-    hsize_t dims_boundId[1];
-    dims_boundId[0] = 0;
+    dataspace = H5Screate_simple( 2, data2d, NULL );
+    dataset = H5Dcreate( fileOut, "/boundFaces", H5T_STD_I64LE, dataspace, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT );
 
-    hid_t dataspace_boundId = H5Screate_simple( 1, dims_boundId, NULL );
-    hid_t dataset_boundId = H5Dcreate( fileOut, "/boundFacesId", H5T_STD_I64LE, dataspace_boundId, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT );
-
-    // Close the dataset and dataspace
-    status_hdf = H5Dclose( dataset_bound );
-    status_hdf = H5Sclose( dataspace_bound );
+    // Write the boundary connectivity table
+    status_hdf = H5Dwrite( dataset, H5T_NATIVE_LLONG, H5S_ALL, H5S_ALL, H5P_DEFAULT, connecQUAD_SOD );
 
     // Close the dataset and dataspace
-    status_hdf = H5Dclose( dataset_bound );
-    status_hdf = H5Sclose( dataspace_bound );
+    status_hdf = H5Dclose( dataset );
+    status_hdf = H5Sclose( dataspace );
 
-    // Create a dataset for the connectivity table
-    hsize_t dims_coord[2];
-    dims_coord[0] = nelem;
-    dims_coord[1] = (porder+1)*(porder+1)*(porder+1);
+    // Create a dataset for belemId
+    data1d[0] = nbelem;
 
-    hid_t dataspace_id = H5Screate_simple( 2, dims_coord, NULL );
-    hid_t dataset_id = H5Dcreate( fileOut, "/connec", H5T_STD_I64LE, dataspace_id, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT );
+    dataspace = H5Screate_simple( 1, data1d, NULL );
+    dataset = H5Dcreate( fileOut, "/boundFacesID", H5T_STD_I64LE, dataspace, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT );
 
-    // Write the connectivity table
-    status_hdf = H5Dwrite( dataset_id, H5T_NATIVE_LLONG, H5S_ALL, H5S_ALL, H5P_DEFAULT, connecSOD2D );
-    if ( status_hdf < 0 )
-    {
-        if ( mpi_rank == 0 )
-        {
-            std::cerr << "Error: Cannot write the connectivity table" << std::endl;
-        }
-        MPI_Abort( MPI_COMM_WORLD, 1 );
-        return 1;
-    }
+    // Write the boundary element ID
+    status_hdf = H5Dwrite( dataset, H5T_NATIVE_LLONG, H5S_ALL, H5S_ALL, H5P_DEFAULT, belemId );
 
-    // Destroy connec and close the dataset and dataspace
-    delete[] connec;
-    status_hdf = H5Dclose( dataset_id );
-    status_hdf = H5Sclose( dataspace_id );
+    // Close the dataset and dataspace
+    status_hdf = H5Dclose( dataset );
+    status_hdf = H5Sclose( dataspace );
 
-    dims_coord[0] = npoin;
-    dims_coord[1] = 3;
+    // Create a dataset for the HEXA connectivity table
+    data2d[0] = nelem;
+    data2d[1] = nnode;
 
-    dataspace_id = H5Screate_simple( 2, dims_coord, NULL );
-    dataset_id = H5Dcreate( fileOut, "/coord", H5T_IEEE_F64LE, dataspace_id, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT );
+    dataspace = H5Screate_simple( 2, data2d, NULL );
+    dataset = H5Dcreate( fileOut, "/connec", H5T_STD_I64LE, dataspace, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT );
+
+    // Write the HEXA connectivity table
+    status_hdf = H5Dwrite( dataset, H5T_NATIVE_LLONG, H5S_ALL, H5S_ALL, H5P_DEFAULT, connecHEXA_SOD );
+
+    // Close the dataset and dataspace
+    status_hdf = H5Dclose( dataset );
+    status_hdf = H5Sclose( dataspace );
+
+    // Create a dataset for the coordinates
+    data2d[0] = npoin;
+    data2d[1] = 3;
+
+    dataspace = H5Screate_simple( 2, data2d, NULL );
+    dataset = H5Dcreate( fileOut, "/coords", H5T_IEEE_F64LE, dataspace, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT );
 
     // Write the coordinates
-    status_hdf = H5Dwrite( dataset_id, H5T_IEEE_F64LE, H5S_ALL, H5S_ALL, H5P_DEFAULT, xyz );
-    if ( status_hdf < 0 )
-    {
-        if ( mpi_rank == 0 )
-        {
-            std::cerr << "Error: Cannot write the coordinates" << std::endl;
-        }
-        MPI_Abort( MPI_COMM_WORLD, 1 );
-        return 1;
-    }
-
-    // Destroy coord and close the dataset and dataspace
-    status_hdf = H5Dclose( dataset_id );
-    status_hdf = H5Sclose( dataspace_id );
-
-    // From "/", create the group "/dims"
-    hid_t group_dims = H5Gcreate( fileOut, "/dims", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT );
-
-    // Create the dataset "/dims/numBoundaryFaces"
-    hsize_t dims_numBound[1];
-    dims_numBound[0] = 1;
-
-    hid_t dataspace_numBound = H5Screate_simple( 1, dims_numBound, NULL );
-    hid_t dataset_numBound = H5Dcreate( fileOut, "/dims/numBoundaryFaces", H5T_STD_I64LE, dataspace_numBound, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT );
-
-    // Write the number of boundary faces
-    int numBound = 0;
-    status_hdf = H5Dwrite( dataset_numBound, H5T_STD_I64LE, H5S_ALL, H5S_ALL, H5P_DEFAULT, &numBound );
+    status_hdf = H5Dwrite( dataset, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL, H5P_DEFAULT, xyz );
 
     // Close the dataset and dataspace
-    status_hdf = H5Dclose( dataset_numBound );
-    status_hdf = H5Sclose( dataspace_numBound );
+    status_hdf = H5Dclose( dataset );
+    status_hdf = H5Sclose( dataspace );
 
-    // Create the dataset "/dims/numElements"
-    hsize_t dims_numElem[1];
-    dims_numElem[0] = 1;
+    // From "/" create the dims group
+    group = H5Gcreate( fileOut, "/dims", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT );
 
-    hid_t dataspace_numElem = H5Screate_simple( 1, dims_numElem, NULL );
-    hid_t dataset_numElem = H5Dcreate( fileOut, "/dims/numElements", H5T_STD_I64LE, dataspace_numElem, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT );
+    // Create a dataset for the number of boundary elements
+    data1d[0] = 1;
+
+    dataspace = H5Screate_simple( 1, data1d, NULL );
+    dataset = H5Dcreate( fileOut, "/dims/numBoundaryFaces", H5T_STD_I64LE, dataspace, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT );
+
+    // Write the number of boundary elements
+    status_hdf = H5Dwrite( dataset, H5T_NATIVE_LLONG, H5S_ALL, H5S_ALL, H5P_DEFAULT, &nbelem );
+
+    // Close the dataset and dataspace
+    status_hdf = H5Dclose( dataset );
+    status_hdf = H5Sclose( dataspace );
+
+    // Create a dataset for the number of elements
+    dataspace = H5Screate_simple( 1, data1d, NULL );
+    dataset = H5Dcreate( fileOut, "/dims/numElements", H5T_STD_I64LE, dataspace, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT );
 
     // Write the number of elements
-    status_hdf = H5Dwrite( dataset_numElem, H5T_STD_I64LE, H5S_ALL, H5S_ALL, H5P_DEFAULT, &nelem );
+    status_hdf = H5Dwrite( dataset, H5T_NATIVE_LLONG, H5S_ALL, H5S_ALL, H5P_DEFAULT, &nelem );
 
     // Close the dataset and dataspace
-    status_hdf = H5Dclose( dataset_numElem );
-    status_hdf = H5Sclose( dataspace_numElem );
+    status_hdf = H5Dclose( dataset );
+    status_hdf = H5Sclose( dataspace );
 
-    // Create the dataset "/dims/numMappedFaces"
-    hsize_t dims_numMapFace[1];
-    dims_numMapFace[0] = 1;
+    // Create a dataset for the number of mapped faces
+    dataspace = H5Screate_simple( 1, data1d, NULL );
+    dataset = H5Dcreate( fileOut, "/dims/numMappedFaces", H5T_STD_I64LE, dataspace, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT );
 
-    hid_t dataspace_numMapFace = H5Screate_simple( 1, dims_numMapFace, NULL );
-    hid_t dataset_numMapFace = H5Dcreate( fileOut, "/dims/numMappedFaces", H5T_STD_I64LE, dataspace_numMapFace, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT );
-
-    // Write the number of mapped faces
-    int numMapFace = 0;
-    status_hdf = H5Dwrite( dataset_numMapFace, H5T_STD_I64LE, H5S_ALL, H5S_ALL, H5P_DEFAULT, &numMapFace );
+    // Write the number of mapped faces (0 for now)
+    uint64_t numMappedFaces = 0;
+    status_hdf = H5Dwrite( dataset, H5T_NATIVE_LLONG, H5S_ALL, H5S_ALL, H5P_DEFAULT, &numMappedFaces );
 
     // Close the dataset and dataspace
-    status_hdf = H5Dclose( dataset_numMapFace );
-    status_hdf = H5Sclose( dataspace_numMapFace );
+    status_hdf = H5Dclose( dataset );
+    status_hdf = H5Sclose( dataspace );
 
-    // Create the dataset "/dims/numNodes"
-    hsize_t dims_numNodes[1];
-    dims_numNodes[0] = 1;
+    // Create a dataset for the number of periodic faces
+    dataspace = H5Screate_simple( 1, data1d, NULL );
+    dataset = H5Dcreate( fileOut, "/dims/numPeriodicFaces", H5T_STD_I64LE, dataspace, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT );
 
-    hid_t dataspace_numNodes = H5Screate_simple( 1, dims_numNodes, NULL );
-    hid_t dataset_numNodes = H5Dcreate( fileOut, "/dims/numNodes", H5T_STD_I64LE, dataspace_numNodes, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT );
-
-    // Write the number of nodes
-    status_hdf = H5Dwrite( dataset_numNodes, H5T_STD_I64LE, H5S_ALL, H5S_ALL, H5P_DEFAULT, &npoin );
+    // Write the number of periodic faces (0 for now)
+    uint64_t numPeriodicFaces = 0;
+    status_hdf = H5Dwrite( dataset, H5T_NATIVE_LLONG, H5S_ALL, H5S_ALL, H5P_DEFAULT, &numPeriodicFaces );
 
     // Close the dataset and dataspace
-    status_hdf = H5Dclose( dataset_numNodes );
-    status_hdf = H5Sclose( dataspace_numNodes );
+    status_hdf = H5Dclose( dataset );
+    status_hdf = H5Sclose( dataspace );
 
-    /// Cloose the group "/dims
-    status_hdf = H5Gclose( group_dims )
-    */
+    // Create a dataset for the number of periodic links
+    dataspace = H5Screate_simple( 1, data1d, NULL );
+    dataset = H5Dcreate( fileOut, "/dims/numPeriodicLinks", H5T_STD_I64LE, dataspace, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT );
+
+    // Write the number of periodic links (0 for now)
+    uint64_t numPeriodicLinks = 0;
+    status_hdf = H5Dwrite( dataset, H5T_NATIVE_LLONG, H5S_ALL, H5S_ALL, H5P_DEFAULT, &numPeriodicLinks );
+
+    // Close the dataset and dataspace
+    status_hdf = H5Dclose( dataset );
+    status_hdf = H5Sclose( dataspace );
+
+    // Create a dataset for the element order
+    dataspace = H5Screate_simple( 1, data1d, NULL );
+    dataset = H5Dcreate( fileOut, "/dims/order", H5T_STD_I32LE, dataspace, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT );
+
+    // Write the element order
+    int order = porder;
+    status_hdf = H5Dwrite( dataset, H5T_NATIVE_INT, H5S_ALL, H5S_ALL, H5P_DEFAULT, &order );
+
+    // Close the dataset and dataspace
+    status_hdf = H5Dclose( dataset );
+    status_hdf = H5Sclose( dataspace );
+
+    // Close the dims group
+    status_hdf = H5Gclose( group );
+
+    // On the root group, create a dataset for the mapped faces
+    data2d[0] = numMappedFaces;
+    data2d[1] = nbnode;
+
+    dataspace = H5Screate_simple( 2, data2d, NULL );
+    dataset = H5Dcreate( fileOut, "/mappedFaces", H5T_STD_I64LE, dataspace, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT );
+
+    // Write the mapped faces (empty for now)
+    uint64_t *mappedFaces;
+    if ( numMappedFaces > 0 )
+    {
+        status_hdf = H5Dwrite( dataset, H5T_NATIVE_LLONG, H5S_ALL, H5S_ALL, H5P_DEFAULT, mappedFaces );
+    }
+
+    // Close the dataset and dataspace
+    status_hdf = H5Dclose( dataset );
+    status_hdf = H5Sclose( dataspace );
+
+    // On the root group, create a dataset for the periodic faces
+    data2d[0] = numPeriodicFaces;
+    data2d[1] = nbnode;
+
+    dataspace = H5Screate_simple( 2, data2d, NULL );
+    dataset = H5Dcreate( fileOut, "/periodicFaces", H5T_STD_I64LE, dataspace, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT );
+
+    // Write the periodic faces (empty for now)
+    uint64_t *periodicFaces;
+    if ( numPeriodicFaces > 0 )
+    {
+        status_hdf = H5Dwrite( dataset, H5T_NATIVE_LLONG, H5S_ALL, H5S_ALL, H5P_DEFAULT, periodicFaces );
+    }
+
+    // Create a dataset for the periodic links
+    data2d[0] = numPeriodicLinks;
+    data2d[1] = 2;
+
+    dataspace = H5Screate_simple( 2, data2d, NULL );
+    dataset = H5Dcreate( fileOut, "/periodicLinks", H5T_STD_I64LE, dataspace, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT );
+
+    // Write the periodic links (empty for now)
+    uint64_t *periodicLinks;
+    if ( numPeriodicLinks > 0 )
+    {
+        status_hdf = H5Dwrite( dataset, H5T_NATIVE_LLONG, H5S_ALL, H5S_ALL, H5P_DEFAULT, periodicLinks );
+    }
+
+    // Close the dataset and dataspace
+    status_hdf = H5Dclose( dataset );
+    status_hdf = H5Sclose( dataspace );
 
     // Close the HDF5 file
     status_hdf = H5Fclose( fileOut );
