@@ -60,6 +60,7 @@ class Conversor
             {5, 6},
             {6, 7}
         };
+
         const int sod2d_HexaFaces[6][4] = {
             {0, 3, 2, 1},
             {0, 1, 5, 4},
@@ -68,6 +69,19 @@ class Conversor
             {2, 3, 7, 6},
             {4, 5, 6, 7}
         };
+
+        const int testGMSH[27] = {
+            0,8,1,9,20,11,3,13,2,
+            10,21,12,22,26,23,15,24,14,
+            4,16,5,17,25,18,7,19,6
+        };
+
+        const int testCGNS[27] = {
+            1,9,2,12,21,10,4,11,3,
+            13,22,14,25,27,23,16,24,15,
+            5,17,6,20,26,18,8,19,7
+        };
+
         int **cgns_QuadIndexTable;
         int **cgns_HexaIndexTable;
         int **cgns_QuadIJ;

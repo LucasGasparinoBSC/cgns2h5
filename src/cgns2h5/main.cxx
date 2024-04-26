@@ -130,6 +130,7 @@ int main( int argc, char *argv[] )
     }
 
     // Allocate data for the coordinates (assuming 3D)
+    double *tmp = new double[npoin];
     double *xyz = new double[npoin*3];
     cgsize_t irmin, irmax, istart, iend;
 
@@ -139,11 +140,30 @@ int main( int argc, char *argv[] )
 
     // Read the coordinates using serial CGNS
     cg_coord_read( cgns_file, idx_Base, idx_Zone, "CoordinateX",
-                   CGNS_ENUMV(RealDouble), &irmin, &irmax, xyz );
+                   CGNS_ENUMV(RealDouble), &irmin, &irmax, tmp );
+    #pragma acc parallel loop
+    for ( uint64_t i = 0; i < npoin; i++ )
+    {
+        xyz[i*3 + 0] = tmp[i];
+    }
+
     cg_coord_read( cgns_file, idx_Base, idx_Zone, "CoordinateY",
-                   CGNS_ENUMV(RealDouble), &irmin, &irmax, xyz+npoin );
+                   CGNS_ENUMV(RealDouble), &irmin, &irmax, tmp );
+    #pragma acc parallel loop
+    for ( uint64_t i = 0; i < npoin; i++ )
+    {
+        xyz[i*3 + 1] = tmp[i];
+    }
     cg_coord_read( cgns_file, idx_Base, idx_Zone, "CoordinateZ",
-                   CGNS_ENUMV(RealDouble), &irmin, &irmax, xyz+npoin*2 );
+                   CGNS_ENUMV(RealDouble), &irmin, &irmax, tmp );
+    #pragma acc parallel loop
+    for ( uint64_t i = 0; i < npoin; i++ )
+    {
+        xyz[i*3 + 2] = tmp[i];
+    }
+
+    // Free the temporary buffer
+    delete[] tmp;
 
     // Get the number of sections
     int nsections;

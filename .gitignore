@@ -1,3 +1,7 @@
 build
 *.h5
 *.nsys-rep
+*.cgns
+*.hdf
+*.dat
+tool_meshConversor*
