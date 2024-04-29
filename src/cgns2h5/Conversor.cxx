@@ -441,6 +441,24 @@ void Conversor::convert2sod_HEXA( int &pOrder, uint64_t &nElem, int &nNode, cgsi
         {
             connecConv[i] = 0;
         }
+
+        /*
+        #pragma acc loop vector
+        for ( int iNode = 0; iNode < nNode; iNode++ )
+        {
+            int kc = testCGNS[iNode]-1;
+            int kg = testGMSH[iNode];
+            connecConv[kg] = connecCGNS[iElem*nNode+kc];
+        }
+
+        // Add local converted connectivity to global SOD table
+        #pragma acc loop vector
+        for ( int iNode = 0; iNode < nNode; iNode++ )
+        {
+            connecSOD2D[iElem*nNode+iNode] = connecConv[iNode];
+        }
+        */
+
         #pragma acc loop vector
         for ( int iNode = 0; iNode < nNode; iNode++ )
         {
@@ -458,6 +476,7 @@ void Conversor::convert2sod_HEXA( int &pOrder, uint64_t &nElem, int &nNode, cgsi
             // Put the node on the new position
             connecConv[iNodeSOD2D] = connec[iNode];
         }
+
         // Add local converted connectivity to global SOD table
         #pragma acc loop vector
         for ( int iNode = 0; iNode < nNode; iNode++ )

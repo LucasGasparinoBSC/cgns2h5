@@ -1,0 +1,8 @@
+ --| Evaluating mesh quality
+ ----| List of tangled elements (GMSH global numeration)
+ ----| End of list of tangled elements
+ --| Mesh quality evaluated
+ --| Mesh statistics
+ ----| Max quality:   0.9480581    
+ ----| Min quality:   0.5064402    
+ ----| Avg quality:   0.8052273    

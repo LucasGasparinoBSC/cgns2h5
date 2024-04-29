@@ -306,9 +306,12 @@ int main( int argc, char *argv[] )
 
     // Convert to SOD format
     cgsize_t *connecQUAD_SOD = new cgsize_t[nbelem*nbnode];
-    memset( connecQUAD_SOD, 0, nbelem*nbnode*sizeof(cgsize_t) );
-    std::cout << "Converting QUAD connectivity to SOD format..." << std::endl;
-    conv.convert2sod_QUAD( porder, nbelem, nbnode, connecQUAD, connecQUAD_SOD );
+    if ( nbound > 0 )
+    {
+        memset( connecQUAD_SOD, 0, nbelem*nbnode*sizeof(cgsize_t) );
+        std::cout << "Converting QUAD connectivity to SOD format..." << std::endl;
+        conv.convert2sod_QUAD( porder, nbelem, nbnode, connecQUAD, connecQUAD_SOD );
+    }
 
     // Free the original connectivity
     delete[] connecQUAD;
@@ -429,7 +432,7 @@ int main( int argc, char *argv[] )
     dataset = H5Dcreate( fileOut, "/dims/numNodes", H5T_STD_I64LE, dataspace, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT );
 
     // Write the nodes per element
-    uint64_t numNodes = nnode_sec[0];
+    uint64_t numNodes = npoin;
     status_hdf = H5Dwrite( dataset, H5T_NATIVE_LLONG, H5S_ALL, H5S_ALL, H5P_DEFAULT, &numNodes );
 
     // Close the dataset and dataspace
