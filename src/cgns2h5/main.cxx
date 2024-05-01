@@ -49,12 +49,12 @@ int main( int argc, char *argv[] )
     }
 
     // Check if the number of arguments is correct
-    if ( argc != 3 )
+    if ( argc != 4 )
     {
         if ( mpi_rank == 0 )
         {
             std::cerr << "Too few arguments!" << std::endl;
-            std::cerr << "Usage: " << argv[0] << " <input.cgns> <output.h5>" << std::endl;
+            std::cerr << "Usage: " << argv[0] << " <input.cgns> <output.h5> <scale_factor>" << std::endl;
         }
         MPI_Abort( MPI_COMM_WORLD, 1 );
         return 1;
@@ -139,12 +139,25 @@ int main( int argc, char *argv[] )
     irmax = npoin;
 
     // Read the coordinates using serial CGNS
+
+    // Scale factor is last argument
+    double scale_factor = atof(argv[3]);
+    if ( scale_factor <= 0.0 )
+    {
+        if ( mpi_rank == 0 )
+        {
+            std::cerr << "Error: Scale factor should be greater than zero!" << std::endl;
+        }
+        MPI_Abort( MPI_COMM_WORLD, 1 );
+        return 1;
+    }
+
     cg_coord_read( cgns_file, idx_Base, idx_Zone, "CoordinateX",
                    CGNS_ENUMV(RealDouble), &irmin, &irmax, tmp );
     #pragma acc parallel loop
     for ( uint64_t i = 0; i < npoin; i++ )
     {
-        xyz[i*3 + 0] = tmp[i];
+        xyz[i*3 + 0] = scale_factor * tmp[i];
     }
 
     cg_coord_read( cgns_file, idx_Base, idx_Zone, "CoordinateY",
@@ -152,14 +165,14 @@ int main( int argc, char *argv[] )
     #pragma acc parallel loop
     for ( uint64_t i = 0; i < npoin; i++ )
     {
-        xyz[i*3 + 1] = tmp[i];
+        xyz[i*3 + 1] = scale_factor * tmp[i];
     }
     cg_coord_read( cgns_file, idx_Base, idx_Zone, "CoordinateZ",
                    CGNS_ENUMV(RealDouble), &irmin, &irmax, tmp );
     #pragma acc parallel loop
     for ( uint64_t i = 0; i < npoin; i++ )
     {
-        xyz[i*3 + 2] = tmp[i];
+        xyz[i*3 + 2] = scale_factor * tmp[i];
     }
 
     // Free the temporary buffer
