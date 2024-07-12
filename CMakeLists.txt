@@ -3,6 +3,12 @@ cmake_minimum_required(VERSION 3.20)
 set(ENV{CC} "mpicc")
 set(ENV{CXX} "mpicxx")
 
+# CMake extra file are on this path
+set(CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
+
+# Include the extra file
+include(gpu)
+
 project(tool_cgns2h5 LANGUAGES C CXX)
 
 # Find HDF5
@@ -22,20 +28,30 @@ if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release)
 endif()
 
-# If compiler name not NVHPC or PGI, exit
-if(NOT CMAKE_C_COMPILER_ID STREQUAL "NVHPC" OR CMAKE_C_COMPILER_ID STREQUAL "PGI")
-    message(FATAL_ERROR "Compiler must be NVHPC or PGI")
-endif()
-
 # Set C/CXX flags
-set(CMAKE_C_FLAGS "-acc -cuda -Minfo=all -gpu=cc86,lineinfo,managed -lnvToolsExt")
-set(CMAKE_CXX_FLAGS "-acc -cuda -Minfo=all -gpu=cc86,lineinfo,managed -lnvToolsExt")
-# Debug flags
-set(CMAKE_C_FLAGS_DEBUG "-g -O0 -traceback")
-set(CMAKE_CXX_FLAGS_DEBUG "-g -O0 -traceback")
-# Release flags
-set(CMAKE_C_FLAGS_RELEASE "-fast")
-set(CMAKE_CXX_FLAGS_RELEASE "-fast")
+# NVIDIA compiler
+if(CMAKE_C_COMPILER_ID STREQUAL "NVHPC" OR CMAKE_C_COMPILER_ID STREQUAL "PGI")
+    # Use nvidia-smi to find the compute capability of your GPU
+    set_gpu()
+    set(CMAKE_C_FLAGS "-acc -cuda -Minfo=all -gpu=cc${GPU_CC},cuda${CUDA_VERSION},lineinfo,managed -lnvToolsExt")
+    set(CMAKE_CXX_FLAGS "-acc -cuda -Minfo=all -gpu=cc${GPU_CC},cuda${CUDA_VERSION},lineinfo,managed -lnvToolsExt")
+    # Debug flags
+    set(CMAKE_C_FLAGS_DEBUG "-g -O0 -traceback")
+    set(CMAKE_CXX_FLAGS_DEBUG "-g -O0 -traceback")
+    # Release flags
+    set(CMAKE_C_FLAGS_RELEASE "-fast")
+    set(CMAKE_CXX_FLAGS_RELEASE "-fast")
+# GNU compiler
+elseif(CMAKE_C_COMPILER_ID STREQUAL "GNU")
+    set(CMAKE_C_FLAGS "-fopenmp")
+    set(CMAKE_CXX_FLAGS "-fopenmp")
+    # Debug flags
+    set(CMAKE_C_FLAGS_DEBUG "-g -O0 -Wall -Wextra -Wpedantic -Werror")
+    set(CMAKE_CXX_FLAGS_DEBUG "-g -O0 -Wall -Wextra -Wpedantic -Werror")
+    # Release flags
+    set(CMAKE_C_FLAGS_RELEASE "-O3")
+    set(CMAKE_CXX_FLAGS_RELEASE "-O3")
+endif()
 
 # use, i.e. don't skip the full RPATH for the build tree
 set(CMAKE_SKIP_BUILD_RPATH FALSE)
