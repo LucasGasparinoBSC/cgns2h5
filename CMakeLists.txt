@@ -1,5 +1,11 @@
 cmake_minimum_required(VERSION 3.20)
 
+# Options
+option(USE_MN5 "Compiling in MareNostrum5" ON)
+if(USE_MN5)
+    message("Linking HDF5 as HDF5::HDF5...")
+endif(USE_MN5)
+
 set(ENV{CC} "mpicc")
 set(ENV{CXX} "mpicxx")
 
