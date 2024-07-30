@@ -37,17 +37,6 @@ int main( int argc, char *argv[] )
     MPI_Comm_size( MPI_COMM_WORLD, &mpi_nprocs );
     MPI_Comm_rank( MPI_COMM_WORLD, &mpi_rank );
 
-    // for now, support runs with only 1 process
-    if ( mpi_nprocs != 1 )
-    {
-        if ( mpi_rank == 0 )
-        {
-            std::cerr << "Error: This program only supports runs with 1 process" << std::endl;
-        }
-        MPI_Abort( MPI_COMM_WORLD, 1 );
-        return 1;
-    }
-
     // Check if the number of arguments is correct
     if ( argc != 4 )
     {
