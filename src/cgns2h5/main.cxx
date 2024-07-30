@@ -82,8 +82,6 @@ int main( int argc, char *argv[] )
         return 1;
     }
 
-    // Reader:
-
     // Set the MPI communicator for parallel CGNS
     cgp_mpi_comm(MPI_COMM_WORLD);
 
@@ -102,6 +100,16 @@ int main( int argc, char *argv[] )
         MPI_Abort( MPI_COMM_WORLD, 1 );
         return 1;
     }
+
+    // Open the output H5 file in parallel mode
+    hid_t fileOut;
+    fileOut = H5Fcreate( output_h5.c_str(), H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT );
+
+    // Basic hdf5 variables
+    hid_t dataspace, dataset, group;
+    herr_t status_hdf;
+    hsize_t data1d[1];
+    hsize_t data2d[2];
 
     // Simple version: assume 1 base with 1 zone
     const int idx_Base = 1;
@@ -130,9 +138,10 @@ int main( int argc, char *argv[] )
     }
 
     // Allocate data for the coordinates (assuming 3D)
+    cgsize_t irmin, irmax, istart, iend;
     double *tmp = new double[npoin];
     double *xyz = new double[npoin*3];
-    cgsize_t irmin, irmax, istart, iend;
+    #pragma acc enter data create (tmp[0:npoin], xyz[0:npoin*3])
 
     // Lower and upper range indexes
     irmin = 1;
@@ -154,6 +163,7 @@ int main( int argc, char *argv[] )
 
     cg_coord_read( cgns_file, idx_Base, idx_Zone, "CoordinateX",
                    CGNS_ENUMV(RealDouble), &irmin, &irmax, tmp );
+    #pragma acc update device(tmp[0:npoin])
     #pragma acc parallel loop
     for ( uint64_t i = 0; i < npoin; i++ )
     {
@@ -162,6 +172,7 @@ int main( int argc, char *argv[] )
 
     cg_coord_read( cgns_file, idx_Base, idx_Zone, "CoordinateY",
                    CGNS_ENUMV(RealDouble), &irmin, &irmax, tmp );
+    #pragma acc update device(tmp[0:npoin])
     #pragma acc parallel loop
     for ( uint64_t i = 0; i < npoin; i++ )
     {
@@ -169,14 +180,32 @@ int main( int argc, char *argv[] )
     }
     cg_coord_read( cgns_file, idx_Base, idx_Zone, "CoordinateZ",
                    CGNS_ENUMV(RealDouble), &irmin, &irmax, tmp );
+    #pragma acc update device(tmp[0:npoin])
     #pragma acc parallel loop
     for ( uint64_t i = 0; i < npoin; i++ )
     {
         xyz[i*3 + 2] = scale_factor * tmp[i];
     }
+    #pragma acc update host(xyz[0:npoin*3])
 
-    // Free the temporary buffer
+    // Create a dataset for the coordinates
+    data2d[0] = npoin;
+    data2d[1] = 3;
+
+    dataspace = H5Screate_simple( 2, data2d, NULL );
+    dataset = H5Dcreate( fileOut, "/coords", H5T_IEEE_F64LE, dataspace, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT );
+
+    // Write the coordinates
+    status_hdf = H5Dwrite( dataset, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL, H5P_DEFAULT, xyz );
+
+    // Close the dataset and dataspace
+    status_hdf = H5Dclose( dataset );
+    status_hdf = H5Sclose( dataspace );
+
+        // Free the xyz-related memory
     delete[] tmp;
+    delete[] xyz;
+    #pragma acc exit data delete (tmp, xyz)
 
     // Get the number of sections
     int nsections;
@@ -332,18 +361,6 @@ int main( int argc, char *argv[] )
     // Close the CGNS file
     cgp_close( cgns_file );
 
-    // Writer:
-
-    // Create a HDF5 file with parallel I/O
-    hid_t fileOut;
-    fileOut = H5Fcreate( output_h5.c_str(), H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT );
-
-    // Basic hdf5 variables
-    hid_t dataspace, dataset, group;
-    herr_t status_hdf;
-    hsize_t data1d[1];
-    hsize_t data2d[2];
-
     // Create a dataset for the bounndary connectivity table
     data2d[0] = nbelem;
     data2d[1] = nbnode;
@@ -380,20 +397,6 @@ int main( int argc, char *argv[] )
 
     // Write the HEXA connectivity table
     status_hdf = H5Dwrite( dataset, H5T_NATIVE_LLONG, H5S_ALL, H5S_ALL, H5P_DEFAULT, connecHEXA_SOD );
-
-    // Close the dataset and dataspace
-    status_hdf = H5Dclose( dataset );
-    status_hdf = H5Sclose( dataspace );
-
-    // Create a dataset for the coordinates
-    data2d[0] = npoin;
-    data2d[1] = 3;
-
-    dataspace = H5Screate_simple( 2, data2d, NULL );
-    dataset = H5Dcreate( fileOut, "/coords", H5T_IEEE_F64LE, dataspace, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT );
-
-    // Write the coordinates
-    status_hdf = H5Dwrite( dataset, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL, H5P_DEFAULT, xyz );
 
     // Close the dataset and dataspace
     status_hdf = H5Dclose( dataset );
