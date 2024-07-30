@@ -296,26 +296,48 @@ int main( int argc, char *argv[] )
     // Allocate data for the connectivity table
     cgsize_t iparent_data;
     cgsize_t *connecHEXA = new cgsize_t[nelem*nnode];
+    #pragma acc enter data create (connecHEXA[0:nelem*nnode])
 
     // Read the connectivity
     cg_elements_read( cgns_file, idx_Base, idx_Zone, 1, connecHEXA, &iparent_data );
+    #pragma acc update device(connecHEXA[0:nelem*nnode])
 
     // Convert to SOD format
     Conversor conv;
     cgsize_t *connecHEXA_SOD = new cgsize_t[nelem*nnode];
+    #pragma acc enter data create(connecHEXA_SOD[0:nelem*nnode])
     memset( connecHEXA_SOD, 0, nelem*nnode*sizeof(cgsize_t) );
+    #pragma acc update device(connecHEXA_SOD[0:nelem*nnode])
+
     std::cout << "Converting HEXA connectivity to SOD format..." << std::endl;
     conv.convert2sod_HEXA( porder, nelem, nnode, connecHEXA, connecHEXA_SOD );
 
-    // Free the original connectivity
-    delete[] connecHEXA;
+    // Create a dataset for the HEXA connectivity table
+    data2d[0] = nelem;
+    data2d[1] = nnode;
 
-    // Remaining sections are BCs, read them. Also crreate belemId array
+    dataspace = H5Screate_simple( 2, data2d, NULL );
+    dataset = H5Dcreate( fileOut, "/connec", H5T_STD_I64LE, dataspace, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT );
+
+    // Write the HEXA connectivity table
+    status_hdf = H5Dwrite( dataset, H5T_NATIVE_LLONG, H5S_ALL, H5S_ALL, H5P_DEFAULT, connecHEXA_SOD );
+
+    // Close the dataset and dataspace
+    status_hdf = H5Dclose( dataset );
+    status_hdf = H5Sclose( dataspace );
+
+    // Free the connectivity pointers
+    delete[] connecHEXA;
+    delete[] connecHEXA_SOD;
+    #pragma acc exit data delete (connecHEXA, connecHEXA_SOD)
+
+    // Remaining sections are BCs, read them. Also create belemId array
     std::cout << "Reading boundary element connectivity..." << std::endl;
 
     istart = 0;
-    cgsize_t *connecQUAD = new cgsize_t[nbelem*nbnode]; // Total BC connectivity
     uint64_t *belemId = new uint64_t[nbelem];           // Boundary element ID
+    cgsize_t *connecQUAD = new cgsize_t[nbelem*nbnode]; // Total BC connectivity
+    #pragma acc enter data create (connecQUAD[0:nbelem*nbnode])
 
     for ( int idx_sec = 2; idx_sec <= nsections; idx_sec++ )
     {
@@ -333,6 +355,7 @@ int main( int argc, char *argv[] )
         cg_elements_read( cgns_file, idx_Base, idx_Zone, idx_sec, connecQUAD_sec, &iparent_data );
 
         // Copy to the total BC connectivity
+        #pragma acc parallel loop gang vector
         for ( int i = 0; i < nbelem_sec[idx_sec-1]; i++ )
         {
             for ( int j = 0; j < nbnode; j++ )
@@ -348,18 +371,15 @@ int main( int argc, char *argv[] )
 
     // Convert to SOD format
     cgsize_t *connecQUAD_SOD = new cgsize_t[nbelem*nbnode];
+    #pragma acc enter data create (connecQUAD_SOD[0:nbelem*nbnode])
     if ( nbound > 0 )
     {
         memset( connecQUAD_SOD, 0, nbelem*nbnode*sizeof(cgsize_t) );
+        #pragma acc update device(connecQUAD_SOD[0:nbelem*nbnode])
+
         std::cout << "Converting QUAD connectivity to SOD format..." << std::endl;
         conv.convert2sod_QUAD( porder, nbelem, nbnode, connecQUAD, connecQUAD_SOD );
     }
-
-    // Free the original connectivity
-    delete[] connecQUAD;
-
-    // Close the CGNS file
-    cgp_close( cgns_file );
 
     // Create a dataset for the bounndary connectivity table
     data2d[0] = nbelem;
@@ -375,6 +395,14 @@ int main( int argc, char *argv[] )
     status_hdf = H5Dclose( dataset );
     status_hdf = H5Sclose( dataspace );
 
+    // Free the original connectivity
+    delete[] connecQUAD;
+    delete[] connecQUAD_SOD;
+    #pragma acc exit data delete (connecQUAD, connecQUAD_SOD)
+
+    // Close the CGNS file
+    cgp_close( cgns_file );
+
     // Create a dataset for belemId
     data1d[0] = nbelem;
 
@@ -383,20 +411,6 @@ int main( int argc, char *argv[] )
 
     // Write the boundary element ID
     status_hdf = H5Dwrite( dataset, H5T_NATIVE_LLONG, H5S_ALL, H5S_ALL, H5P_DEFAULT, belemId );
-
-    // Close the dataset and dataspace
-    status_hdf = H5Dclose( dataset );
-    status_hdf = H5Sclose( dataspace );
-
-    // Create a dataset for the HEXA connectivity table
-    data2d[0] = nelem;
-    data2d[1] = nnode;
-
-    dataspace = H5Screate_simple( 2, data2d, NULL );
-    dataset = H5Dcreate( fileOut, "/connec", H5T_STD_I64LE, dataspace, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT );
-
-    // Write the HEXA connectivity table
-    status_hdf = H5Dwrite( dataset, H5T_NATIVE_LLONG, H5S_ALL, H5S_ALL, H5P_DEFAULT, connecHEXA_SOD );
 
     // Close the dataset and dataspace
     status_hdf = H5Dclose( dataset );
