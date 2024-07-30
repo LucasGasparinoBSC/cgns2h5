@@ -126,15 +126,41 @@ int main( int argc, char *argv[] )
         printf("Number of faces: %ld\n", nface);
     }
 
+    // Compute nodes per rank
+    float ratio = (float)npoin / (float)mpi_nprocs;
+    int npoin_local;
+    int lnpr[mpi_nprocs];
+    {
+        int aux = (int)ratio;
+        if (ratio - aux > 0.5) aux++;
+        for (int i = 0; i < mpi_nprocs; i++)
+        {
+            lnpr[i] = aux;
+        }
+        lnpr[mpi_nprocs-1] = npoin - (mpi_nprocs-1)*aux;
+        npoin_local = lnpr[mpi_rank];
+    }
+
     // Allocate data for the coordinates (assuming 3D)
     cgsize_t irmin, irmax, istart, iend;
-    double *tmp = new double[npoin];
-    double *xyz = new double[npoin*3];
-    #pragma acc enter data create (tmp[0:npoin], xyz[0:npoin*3])
+    double *tmp = new double[npoin_local];
+    double *xyz = new double[npoin_local*3];
+    #pragma acc enter data create (tmp[0:npoin_local], xyz[0:npoin_local*3])
 
-    // Lower and upper range indexes
-    irmin = 1;
-    irmax = npoin;
+    // Lower and upper range indexes for each rank
+    if (mpi_rank == 0)
+    {
+        irmin = 1;
+        irmax = lnpr[0];
+    }
+    else
+    {
+        irmin = lnpr[mpi_rank-1]*mpi_rank + 1;
+        irmax = lnpr[mpi_rank] + irmin - 1;
+    }
+
+    printf("Rank %d: irmin = %ld, irmax = %ld\n", mpi_rank, irmin, irmax);
+    MPI_Barrier( MPI_COMM_WORLD );
 
     // Read the coordinates using serial CGNS
 
