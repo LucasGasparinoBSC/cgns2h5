@@ -180,7 +180,7 @@ int main( int argc, char *argv[] )
                    CGNS_ENUMV(RealDouble), &irmin, &irmax, tmp );
     #pragma acc update device(tmp[0:npoin])
     #pragma acc parallel loop
-    for ( uint64_t i = 0; i < npoin; i++ )
+    for ( uint64_t i = 0; i < npoin_local; i++ )
     {
         xyz[i*3 + 0] = scale_factor * tmp[i];
     }
@@ -189,7 +189,7 @@ int main( int argc, char *argv[] )
                    CGNS_ENUMV(RealDouble), &irmin, &irmax, tmp );
     #pragma acc update device(tmp[0:npoin])
     #pragma acc parallel loop
-    for ( uint64_t i = 0; i < npoin; i++ )
+    for ( uint64_t i = 0; i < npoin_local; i++ )
     {
         xyz[i*3 + 1] = scale_factor * tmp[i];
     }
@@ -197,7 +197,7 @@ int main( int argc, char *argv[] )
                    CGNS_ENUMV(RealDouble), &irmin, &irmax, tmp );
     #pragma acc update device(tmp[0:npoin])
     #pragma acc parallel loop
-    for ( uint64_t i = 0; i < npoin; i++ )
+    for ( uint64_t i = 0; i < npoin_local; i++ )
     {
         xyz[i*3 + 2] = scale_factor * tmp[i];
     }
