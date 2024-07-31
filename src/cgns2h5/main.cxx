@@ -91,8 +91,10 @@ int main( int argc, char *argv[] )
     }
 
     // Open the output H5 file in parallel mode
-    hid_t fileOut;
-    fileOut = H5Fcreate( output_h5.c_str(), H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT );
+    hid_t plist_id = H5Pcreate( H5P_FILE_ACCESS );
+    H5Pset_fapl_mpio( plist_id, MPI_COMM_WORLD, MPI_INFO_NULL );
+    hid_t fileOut = H5Fcreate( output_h5.c_str(), H5F_ACC_TRUNC, H5P_DEFAULT, plist_id );
+    H5Pclose( plist_id );
 
     // Basic hdf5 variables
     hid_t dataspace, dataset, group;
@@ -203,12 +205,18 @@ int main( int argc, char *argv[] )
     }
     #pragma acc update host(xyz[0:npoin*3])
 
+    MPI_Barrier( MPI_COMM_WORLD );
+
     // Create a dataset for the coordinates
     data2d[0] = npoin;
     data2d[1] = 3;
 
     dataspace = H5Screate_simple( 2, data2d, NULL );
-    dataset = H5Dcreate( fileOut, "/coords", H5T_IEEE_F64LE, dataspace, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT );
+    plist_id = H5Pcreate( H5P_DATASET_CREATE );
+    dataset = H5Dcreate( fileOut, "/coords", H5T_IEEE_F64LE, dataspace, H5P_DEFAULT, plist_id, H5P_DEFAULT );
+    H5Pclose( plist_id );
+
+    // Each rank writes its own xyz array to the dataset: use hyperslab
 
     // Write the coordinates
     status_hdf = H5Dwrite( dataset, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL, H5P_DEFAULT, xyz );
