@@ -17,10 +17,12 @@
 #include <hdf5_hl.h>
 
 // GPU headers
+#ifdef USE_GPU
 #include <cuda.h>
 #include <cuda_runtime.h>
 #include <nvToolsExt.h>
 #include <openacc.h>
+#endif
 
 // Element Type processor
 #include "cgnsElemInfo.h"
@@ -311,6 +313,7 @@ int main( int argc, char *argv[] )
 
     std::cout << "Converting HEXA connectivity to SOD format..." << std::endl;
     conv.convert2sod_HEXA( porder, nelem, nnode, connecHEXA, connecHEXA_SOD );
+    #pragma acc update host(connecHEXA_SOD[0:nelem*nnode])
 
     // Create a dataset for the HEXA connectivity table
     data2d[0] = nelem;
@@ -350,9 +353,11 @@ int main( int argc, char *argv[] )
 
         // Alloc. a buffer for the current BC connectivity
         cgsize_t *connecQUAD_sec = new cgsize_t[nbelem_sec[idx_sec-1]*nbnode];
+        #pragma acc enter data create (connecQUAD_sec[0:nbelem_sec[idx_sec-1]*nbnode])
 
         // Read the connectivity into the buffer
         cg_elements_read( cgns_file, idx_Base, idx_Zone, idx_sec, connecQUAD_sec, &iparent_data );
+        #pragma acc update device(connecQUAD_sec[0:nbelem_sec[idx_sec-1]*nbnode])
 
         // Copy to the total BC connectivity
         #pragma acc parallel loop gang vector
@@ -367,7 +372,9 @@ int main( int argc, char *argv[] )
 
         // Free the buffer
         delete[] connecQUAD_sec;
+        #pragma acc exit data delete (connecQUAD_sec)
     }
+    #pragma acc update host(connecQUAD[0:nbelem*nbnode])
 
     // Convert to SOD format
     cgsize_t *connecQUAD_SOD = new cgsize_t[nbelem*nbnode];

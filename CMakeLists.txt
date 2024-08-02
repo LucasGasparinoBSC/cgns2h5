@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 
 # Options
-option(USE_MN5 "Compiling in MareNostrum5" ON)
+option(USE_MN5 "Compiling in MareNostrum5" OFF)
 if(USE_MN5)
     message("Linking HDF5 as HDF5::HDF5...")
 endif(USE_MN5)
@@ -47,6 +47,7 @@ if(CMAKE_C_COMPILER_ID STREQUAL "NVHPC" OR CMAKE_C_COMPILER_ID STREQUAL "PGI")
     # Release flags
     set(CMAKE_C_FLAGS_RELEASE "-fast")
     set(CMAKE_CXX_FLAGS_RELEASE "-fast")
+    add_compile_definitions("-DUSE_GPU -lnvToolsExt")
 # GNU compiler
 elseif(CMAKE_C_COMPILER_ID STREQUAL "GNU")
     set(CMAKE_C_FLAGS "-fopenmp")
