@@ -218,8 +218,22 @@ int main( int argc, char *argv[] )
 
     // Each rank writes its own xyz array to the dataset: use hyperslab
 
-    // Write the coordinates
-    status_hdf = H5Dwrite( dataset, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL, H5P_DEFAULT, xyz );
+    // Create the memory dataspace
+    hsize_t count[2] = {npoin_local, 3};
+    hsize_t offset[2] = {irmin-1, 0};
+    hid_t memspace_id = H5Screate_simple( 2, count, NULL );
+    hid_t filespace_id = H5Dget_space( dataset );
+    H5Sselect_hyperslab( filespace_id, H5S_SELECT_SET, offset, NULL, count, NULL );
+
+    // Create the dataset transfer property
+    plist_id = H5Pcreate( H5P_DATASET_XFER );
+    H5Pset_dxpl_mpio( plist_id, H5FD_MPIO_COLLECTIVE );
+
+    // Write the data to the dataset
+    status_hdf = H5Dwrite( dataset, H5T_IEEE_F64LE, memspace_id, filespace_id, plist_id, xyz );
+    H5Pclose( plist_id );
+    H5Sclose( memspace_id );
+    H5Sclose( filespace_id );
 
     // Close the dataset and dataspace
     status_hdf = H5Dclose( dataset );
