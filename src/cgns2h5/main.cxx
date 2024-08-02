@@ -39,17 +39,6 @@ int main( int argc, char *argv[] )
     MPI_Comm_size( MPI_COMM_WORLD, &mpi_nprocs );
     MPI_Comm_rank( MPI_COMM_WORLD, &mpi_rank );
 
-    // for now, support runs with only 1 process
-    if ( mpi_nprocs != 1 )
-    {
-        if ( mpi_rank == 0 )
-        {
-            std::cerr << "Error: This program only supports runs with 1 process" << std::endl;
-        }
-        MPI_Abort( MPI_COMM_WORLD, 1 );
-        return 1;
-    }
-
     // Check if the number of arguments is correct
     if ( argc != 4 )
     {
@@ -104,8 +93,10 @@ int main( int argc, char *argv[] )
     }
 
     // Open the output H5 file in parallel mode
-    hid_t fileOut;
-    fileOut = H5Fcreate( output_h5.c_str(), H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT );
+    hid_t plist_id = H5Pcreate( H5P_FILE_ACCESS );
+    H5Pset_fapl_mpio( plist_id, MPI_COMM_WORLD, MPI_INFO_NULL );
+    hid_t fileOut = H5Fcreate( output_h5.c_str(), H5F_ACC_TRUNC, H5P_DEFAULT, plist_id );
+    H5Pclose( plist_id );
 
     // Basic hdf5 variables
     hid_t dataspace, dataset, group;
@@ -139,15 +130,41 @@ int main( int argc, char *argv[] )
         printf("Number of faces: %ld\n", nface);
     }
 
+    // Compute nodes per rank
+    float ratio = (float)npoin / (float)mpi_nprocs;
+    int npoin_local;
+    int lnpr[mpi_nprocs];
+    {
+        int aux = (int)ratio;
+        if (ratio - aux > 0.5) aux++;
+        for (int i = 0; i < mpi_nprocs; i++)
+        {
+            lnpr[i] = aux;
+        }
+        lnpr[mpi_nprocs-1] = npoin - (mpi_nprocs-1)*aux;
+        npoin_local = lnpr[mpi_rank];
+    }
+
     // Allocate data for the coordinates (assuming 3D)
     cgsize_t irmin, irmax, istart, iend;
-    double *tmp = new double[npoin];
-    double *xyz = new double[npoin*3];
-    #pragma acc enter data create (tmp[0:npoin], xyz[0:npoin*3])
+    double *tmp = new double[npoin_local];
+    double *xyz = new double[npoin_local*3];
+    #pragma acc enter data create (tmp[0:npoin_local], xyz[0:npoin_local*3])
 
-    // Lower and upper range indexes
-    irmin = 1;
-    irmax = npoin;
+    // Lower and upper range indexes for each rank
+    if (mpi_rank == 0)
+    {
+        irmin = 1;
+        irmax = lnpr[0];
+    }
+    else
+    {
+        irmin = lnpr[mpi_rank-1]*mpi_rank + 1;
+        irmax = lnpr[mpi_rank] + irmin - 1;
+    }
+
+    printf("Rank %d: irmin = %ld, irmax = %ld\n", mpi_rank, irmin, irmax);
+    MPI_Barrier( MPI_COMM_WORLD );
 
     // Read the coordinates using serial CGNS
 
@@ -167,7 +184,7 @@ int main( int argc, char *argv[] )
                    CGNS_ENUMV(RealDouble), &irmin, &irmax, tmp );
     #pragma acc update device(tmp[0:npoin])
     #pragma acc parallel loop
-    for ( uint64_t i = 0; i < npoin; i++ )
+    for ( uint64_t i = 0; i < npoin_local; i++ )
     {
         xyz[i*3 + 0] = scale_factor * tmp[i];
     }
@@ -176,7 +193,7 @@ int main( int argc, char *argv[] )
                    CGNS_ENUMV(RealDouble), &irmin, &irmax, tmp );
     #pragma acc update device(tmp[0:npoin])
     #pragma acc parallel loop
-    for ( uint64_t i = 0; i < npoin; i++ )
+    for ( uint64_t i = 0; i < npoin_local; i++ )
     {
         xyz[i*3 + 1] = scale_factor * tmp[i];
     }
@@ -184,21 +201,41 @@ int main( int argc, char *argv[] )
                    CGNS_ENUMV(RealDouble), &irmin, &irmax, tmp );
     #pragma acc update device(tmp[0:npoin])
     #pragma acc parallel loop
-    for ( uint64_t i = 0; i < npoin; i++ )
+    for ( uint64_t i = 0; i < npoin_local; i++ )
     {
         xyz[i*3 + 2] = scale_factor * tmp[i];
     }
     #pragma acc update host(xyz[0:npoin*3])
+
+    MPI_Barrier( MPI_COMM_WORLD );
 
     // Create a dataset for the coordinates
     data2d[0] = npoin;
     data2d[1] = 3;
 
     dataspace = H5Screate_simple( 2, data2d, NULL );
-    dataset = H5Dcreate( fileOut, "/coords", H5T_IEEE_F64LE, dataspace, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT );
+    plist_id = H5Pcreate( H5P_DATASET_CREATE );
+    dataset = H5Dcreate( fileOut, "/coords", H5T_IEEE_F64LE, dataspace, H5P_DEFAULT, plist_id, H5P_DEFAULT );
+    H5Pclose( plist_id );
 
-    // Write the coordinates
-    status_hdf = H5Dwrite( dataset, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL, H5P_DEFAULT, xyz );
+    // Each rank writes its own xyz array to the dataset: use hyperslab
+
+    // Create the memory dataspace
+    hsize_t count[2] = {npoin_local, 3};
+    hsize_t offset[2] = {irmin-1, 0};
+    hid_t memspace_id = H5Screate_simple( 2, count, NULL );
+    hid_t filespace_id = H5Dget_space( dataset );
+    H5Sselect_hyperslab( filespace_id, H5S_SELECT_SET, offset, NULL, count, NULL );
+
+    // Create the dataset transfer property
+    plist_id = H5Pcreate( H5P_DATASET_XFER );
+    H5Pset_dxpl_mpio( plist_id, H5FD_MPIO_COLLECTIVE );
+
+    // Write the data to the dataset
+    status_hdf = H5Dwrite( dataset, H5T_IEEE_F64LE, memspace_id, filespace_id, plist_id, xyz );
+    H5Pclose( plist_id );
+    H5Sclose( memspace_id );
+    H5Sclose( filespace_id );
 
     // Close the dataset and dataspace
     status_hdf = H5Dclose( dataset );
