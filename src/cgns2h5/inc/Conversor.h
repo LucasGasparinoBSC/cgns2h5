@@ -100,8 +100,8 @@ class Conversor
         Conversor();
         // Destructor
         ~Conversor();
-        void convert2sod_QUAD( int &pOrder, uint64_t &nElem, int &nNode, cgsize_t* &connecBoundCGNS, cgsize_t* &connecBoundSOD2D );
-        void convert2sod_HEXA( int &pOrder, uint64_t &nElem, int &nNode, cgsize_t* &connecCGNS, cgsize_t* &connecSOD2D );
+        void convert2sod_QUAD( int &pOrder, uint64_t &nElem, int &nNode, cgsize_t* connecBoundCGNS, cgsize_t* connecBoundSOD2D );
+        void convert2sod_HEXA( int &pOrder, uint64_t &nElem, int &nNode, cgsize_t* connecCGNS, cgsize_t* connecSOD2D );
 };
 
 #endif // !CONVERSOR_H_

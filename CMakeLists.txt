@@ -47,6 +47,7 @@ if(CMAKE_C_COMPILER_ID STREQUAL "NVHPC" OR CMAKE_C_COMPILER_ID STREQUAL "PGI")
     # Release flags
     set(CMAKE_C_FLAGS_RELEASE "-fast")
     set(CMAKE_CXX_FLAGS_RELEASE "-fast")
+    add_compile_definitions("-DUSE_GPU -lnvToolsExt")
 # GNU compiler
 elseif(CMAKE_C_COMPILER_ID STREQUAL "GNU")
     set(CMAKE_C_FLAGS "-fopenmp")
