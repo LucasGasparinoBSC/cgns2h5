@@ -2,6 +2,7 @@
 #include <iostream>
 #include <string>
 #include <vector>
+#include <cstring>
 #include <cstdlib>
 #include <cstdio>
 #include <cstdint>
@@ -326,41 +327,92 @@ int main( int argc, char *argv[] )
         }
     }
 
-    printf("Total number of physical boundaries: %d\n", nbound);
-    printf("Total number of boundary elements: %ld\n", nbelem);
+    if ( mpi_rank == 0 )
+    {
+        printf("Total number of physical boundaries: %d\n", nbound);
+        printf("Total number of boundary elements: %ld\n", nbelem);
+    }
 
     // Get the HEXA connectivity (only works for Xevi cases, asssumes 1st section is HEXA)
     std::cout << "Reading HEXA connectivity..." << std::endl;
 
+    // Compute elements per rank
+    ratio = (float)nelem / (float)mpi_nprocs;
+    uint64_t nelem_local;
+    uint64_t lepr[mpi_nprocs];
+    {
+        uint64_t aux = (uint64_t)ratio;
+        if (ratio - aux > 0.5) aux++;
+        for (int i = 0; i < mpi_nprocs; i++)
+        {
+            lepr[i] = aux;
+        }
+        lepr[mpi_nprocs-1] = nelem - (mpi_nprocs-1)*aux;
+        nelem_local = lepr[mpi_rank];
+    }
+
+    // Lower and upper range indexes for each rank
+    if (mpi_rank == 0)
+    {
+        irmin = 1;
+        irmax = lepr[0];
+    }
+    else
+    {
+        irmin = lepr[mpi_rank-1]*mpi_rank + 1;
+        irmax = lepr[mpi_rank] + irmin - 1;
+    }
+
     // Allocate data for the connectivity table
     cgsize_t iparent_data;
-    cgsize_t *connecHEXA = new cgsize_t[nelem*nnode];
-    #pragma acc enter data create (connecHEXA[0:nelem*nnode])
+    cgsize_t *connecHEXA = new cgsize_t[nelem_local*nnode];
+    #pragma acc enter data create (connecHEXA[0:nelem_local*nnode])
 
     // Read the connectivity
-    cg_elements_read( cgns_file, idx_Base, idx_Zone, 1, connecHEXA, &iparent_data );
-    #pragma acc update device(connecHEXA[0:nelem*nnode])
+    cgp_elements_read_data(cgns_file, idx_Base, idx_Zone, 1, irmin, irmax, connecHEXA);
+    //cg_elements_read( cgns_file, idx_Base, idx_Zone, 1, connecHEXA, &iparent_data );
+    #pragma acc update device(connecHEXA[0:nelem_local*nnode])
 
     // Convert to SOD format
     Conversor conv;
-    cgsize_t *connecHEXA_SOD = new cgsize_t[nelem*nnode];
-    #pragma acc enter data create(connecHEXA_SOD[0:nelem*nnode])
-    memset( connecHEXA_SOD, 0, nelem*nnode*sizeof(cgsize_t) );
-    #pragma acc update device(connecHEXA_SOD[0:nelem*nnode])
+    cgsize_t *connecHEXA_SOD = new cgsize_t[nelem_local*nnode];
+    #pragma acc enter data create(connecHEXA_SOD[0:nelem_local*nnode])
+    memset( connecHEXA_SOD, 0, nelem_local*nnode*sizeof(cgsize_t) );
+    #pragma acc update device(connecHEXA_SOD[0:nelem_local*nnode])
 
-    std::cout << "Converting HEXA connectivity to SOD format..." << std::endl;
-    conv.convert2sod_HEXA( porder, nelem, nnode, connecHEXA, connecHEXA_SOD );
-    #pragma acc update host(connecHEXA_SOD[0:nelem*nnode])
+    if (mpi_rank == 0) std::cout << "Converting HEXA connectivity to SOD format..." << std::endl;
+    conv.convert2sod_HEXA( porder, nelem_local, nnode, connecHEXA, connecHEXA_SOD );
+    #pragma acc update host(connecHEXA_SOD[0:nelem_local*nnode])
 
     // Create a dataset for the HEXA connectivity table
     data2d[0] = nelem;
     data2d[1] = nnode;
 
     dataspace = H5Screate_simple( 2, data2d, NULL );
-    dataset = H5Dcreate( fileOut, "/connec", H5T_STD_I64LE, dataspace, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT );
+    plist_id = H5Pcreate( H5P_DATASET_CREATE );
+    dataset = H5Dcreate( fileOut, "/connec", H5T_STD_I64LE, dataspace, H5P_DEFAULT, plist_id, H5P_DEFAULT );
+    H5Pclose( plist_id );
+
+    // Each rank writes its own connecHEXA_SOD array to the dataset: use hyperslab
+
+    // Create the memory dataspace
+    count[0] = nelem_local;
+    count[1] = nnode;
+    offset[0] = irmin-1;
+    offset[1] = 0;
+    memspace_id = H5Screate_simple( 2, count, NULL );
+    filespace_id = H5Dget_space( dataset );
+    H5Sselect_hyperslab( filespace_id, H5S_SELECT_SET, offset, NULL, count, NULL );
+
+    // Create the dataset transfer property
+    plist_id = H5Pcreate( H5P_DATASET_XFER );
+    H5Pset_dxpl_mpio( plist_id, H5FD_MPIO_COLLECTIVE );
 
     // Write the HEXA connectivity table
-    status_hdf = H5Dwrite( dataset, H5T_NATIVE_LLONG, H5S_ALL, H5S_ALL, H5P_DEFAULT, connecHEXA_SOD );
+    status_hdf = H5Dwrite( dataset, H5T_STD_I64LE, memspace_id, filespace_id, plist_id, connecHEXA_SOD );
+    H5Pclose( plist_id );
+    H5Sclose( memspace_id );
+    H5Sclose( filespace_id );
 
     // Close the dataset and dataspace
     status_hdf = H5Dclose( dataset );
