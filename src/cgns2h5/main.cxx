@@ -2,6 +2,7 @@
 #include <iostream>
 #include <string>
 #include <vector>
+#include <cstring>
 #include <cstdlib>
 #include <cstdio>
 #include <cstdint>
@@ -38,17 +39,6 @@ int main( int argc, char *argv[] )
     int mpi_nprocs, mpi_rank;
     MPI_Comm_size( MPI_COMM_WORLD, &mpi_nprocs );
     MPI_Comm_rank( MPI_COMM_WORLD, &mpi_rank );
-
-    // for now, support runs with only 1 process
-    if ( mpi_nprocs != 1 )
-    {
-        if ( mpi_rank == 0 )
-        {
-            std::cerr << "Error: This program only supports runs with 1 process" << std::endl;
-        }
-        MPI_Abort( MPI_COMM_WORLD, 1 );
-        return 1;
-    }
 
     // Check if the number of arguments is correct
     if ( argc != 4 )
@@ -104,8 +94,10 @@ int main( int argc, char *argv[] )
     }
 
     // Open the output H5 file in parallel mode
-    hid_t fileOut;
-    fileOut = H5Fcreate( output_h5.c_str(), H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT );
+    hid_t plist_id = H5Pcreate( H5P_FILE_ACCESS );
+    H5Pset_fapl_mpio( plist_id, MPI_COMM_WORLD, MPI_INFO_NULL );
+    hid_t fileOut = H5Fcreate( output_h5.c_str(), H5F_ACC_TRUNC, H5P_DEFAULT, plist_id );
+    H5Pclose( plist_id );
 
     // Basic hdf5 variables
     hid_t dataspace, dataset, group;
@@ -139,15 +131,41 @@ int main( int argc, char *argv[] )
         printf("Number of faces: %ld\n", nface);
     }
 
+    // Compute nodes per rank
+    float ratio = (float)npoin / (float)mpi_nprocs;
+    int npoin_local;
+    int lnpr[mpi_nprocs];
+    {
+        int aux = (int)ratio;
+        if (ratio - aux > 0.5) aux++;
+        for (int i = 0; i < mpi_nprocs; i++)
+        {
+            lnpr[i] = aux;
+        }
+        lnpr[mpi_nprocs-1] = npoin - (mpi_nprocs-1)*aux;
+        npoin_local = lnpr[mpi_rank];
+    }
+
     // Allocate data for the coordinates (assuming 3D)
     cgsize_t irmin, irmax, istart, iend;
-    double *tmp = new double[npoin];
-    double *xyz = new double[npoin*3];
-    #pragma acc enter data create (tmp[0:npoin], xyz[0:npoin*3])
+    double *tmp = new double[npoin_local];
+    double *xyz = new double[npoin_local*3];
+    #pragma acc enter data create (tmp[0:npoin_local], xyz[0:npoin_local*3])
 
-    // Lower and upper range indexes
-    irmin = 1;
-    irmax = npoin;
+    // Lower and upper range indexes for each rank
+    if (mpi_rank == 0)
+    {
+        irmin = 1;
+        irmax = lnpr[0];
+    }
+    else
+    {
+        irmin = lnpr[mpi_rank-1]*mpi_rank + 1;
+        irmax = lnpr[mpi_rank] + irmin - 1;
+    }
+
+    printf("Rank %d: irmin = %ld, irmax = %ld\n", mpi_rank, irmin, irmax);
+    MPI_Barrier( MPI_COMM_WORLD );
 
     // Read the coordinates using serial CGNS
 
@@ -167,7 +185,7 @@ int main( int argc, char *argv[] )
                    CGNS_ENUMV(RealDouble), &irmin, &irmax, tmp );
     #pragma acc update device(tmp[0:npoin])
     #pragma acc parallel loop
-    for ( uint64_t i = 0; i < npoin; i++ )
+    for ( uint64_t i = 0; i < npoin_local; i++ )
     {
         xyz[i*3 + 0] = scale_factor * tmp[i];
     }
@@ -176,7 +194,7 @@ int main( int argc, char *argv[] )
                    CGNS_ENUMV(RealDouble), &irmin, &irmax, tmp );
     #pragma acc update device(tmp[0:npoin])
     #pragma acc parallel loop
-    for ( uint64_t i = 0; i < npoin; i++ )
+    for ( uint64_t i = 0; i < npoin_local; i++ )
     {
         xyz[i*3 + 1] = scale_factor * tmp[i];
     }
@@ -184,21 +202,41 @@ int main( int argc, char *argv[] )
                    CGNS_ENUMV(RealDouble), &irmin, &irmax, tmp );
     #pragma acc update device(tmp[0:npoin])
     #pragma acc parallel loop
-    for ( uint64_t i = 0; i < npoin; i++ )
+    for ( uint64_t i = 0; i < npoin_local; i++ )
     {
         xyz[i*3 + 2] = scale_factor * tmp[i];
     }
     #pragma acc update host(xyz[0:npoin*3])
+
+    MPI_Barrier( MPI_COMM_WORLD );
 
     // Create a dataset for the coordinates
     data2d[0] = npoin;
     data2d[1] = 3;
 
     dataspace = H5Screate_simple( 2, data2d, NULL );
-    dataset = H5Dcreate( fileOut, "/coords", H5T_IEEE_F64LE, dataspace, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT );
+    plist_id = H5Pcreate( H5P_DATASET_CREATE );
+    dataset = H5Dcreate( fileOut, "/coords", H5T_IEEE_F64LE, dataspace, H5P_DEFAULT, plist_id, H5P_DEFAULT );
+    H5Pclose( plist_id );
 
-    // Write the coordinates
-    status_hdf = H5Dwrite( dataset, H5T_NATIVE_DOUBLE, H5S_ALL, H5S_ALL, H5P_DEFAULT, xyz );
+    // Each rank writes its own xyz array to the dataset: use hyperslab
+
+    // Create the memory dataspace
+    hsize_t count[2] = {npoin_local, 3};
+    hsize_t offset[2] = {irmin-1, 0};
+    hid_t memspace_id = H5Screate_simple( 2, count, NULL );
+    hid_t filespace_id = H5Dget_space( dataset );
+    H5Sselect_hyperslab( filespace_id, H5S_SELECT_SET, offset, NULL, count, NULL );
+
+    // Create the dataset transfer property
+    plist_id = H5Pcreate( H5P_DATASET_XFER );
+    H5Pset_dxpl_mpio( plist_id, H5FD_MPIO_COLLECTIVE );
+
+    // Write the data to the dataset
+    status_hdf = H5Dwrite( dataset, H5T_IEEE_F64LE, memspace_id, filespace_id, plist_id, xyz );
+    H5Pclose( plist_id );
+    H5Sclose( memspace_id );
+    H5Sclose( filespace_id );
 
     // Close the dataset and dataspace
     status_hdf = H5Dclose( dataset );
@@ -289,41 +327,92 @@ int main( int argc, char *argv[] )
         }
     }
 
-    printf("Total number of physical boundaries: %d\n", nbound);
-    printf("Total number of boundary elements: %ld\n", nbelem);
+    if ( mpi_rank == 0 )
+    {
+        printf("Total number of physical boundaries: %d\n", nbound);
+        printf("Total number of boundary elements: %ld\n", nbelem);
+    }
 
     // Get the HEXA connectivity (only works for Xevi cases, asssumes 1st section is HEXA)
     std::cout << "Reading HEXA connectivity..." << std::endl;
 
+    // Compute elements per rank
+    ratio = (float)nelem / (float)mpi_nprocs;
+    uint64_t nelem_local;
+    uint64_t lepr[mpi_nprocs];
+    {
+        uint64_t aux = (uint64_t)ratio;
+        if (ratio - aux > 0.5) aux++;
+        for (int i = 0; i < mpi_nprocs; i++)
+        {
+            lepr[i] = aux;
+        }
+        lepr[mpi_nprocs-1] = nelem - (mpi_nprocs-1)*aux;
+        nelem_local = lepr[mpi_rank];
+    }
+
+    // Lower and upper range indexes for each rank
+    if (mpi_rank == 0)
+    {
+        irmin = 1;
+        irmax = lepr[0];
+    }
+    else
+    {
+        irmin = lepr[mpi_rank-1]*mpi_rank + 1;
+        irmax = lepr[mpi_rank] + irmin - 1;
+    }
+
     // Allocate data for the connectivity table
     cgsize_t iparent_data;
-    cgsize_t *connecHEXA = new cgsize_t[nelem*nnode];
-    #pragma acc enter data create (connecHEXA[0:nelem*nnode])
+    cgsize_t *connecHEXA = new cgsize_t[nelem_local*nnode];
+    #pragma acc enter data create (connecHEXA[0:nelem_local*nnode])
 
     // Read the connectivity
-    cg_elements_read( cgns_file, idx_Base, idx_Zone, 1, connecHEXA, &iparent_data );
-    #pragma acc update device(connecHEXA[0:nelem*nnode])
+    cgp_elements_read_data(cgns_file, idx_Base, idx_Zone, 1, irmin, irmax, connecHEXA);
+    //cg_elements_read( cgns_file, idx_Base, idx_Zone, 1, connecHEXA, &iparent_data );
+    #pragma acc update device(connecHEXA[0:nelem_local*nnode])
 
     // Convert to SOD format
     Conversor conv;
-    cgsize_t *connecHEXA_SOD = new cgsize_t[nelem*nnode];
-    #pragma acc enter data create(connecHEXA_SOD[0:nelem*nnode])
-    memset( connecHEXA_SOD, 0, nelem*nnode*sizeof(cgsize_t) );
-    #pragma acc update device(connecHEXA_SOD[0:nelem*nnode])
+    cgsize_t *connecHEXA_SOD = new cgsize_t[nelem_local*nnode];
+    #pragma acc enter data create(connecHEXA_SOD[0:nelem_local*nnode])
+    memset( connecHEXA_SOD, 0, nelem_local*nnode*sizeof(cgsize_t) );
+    #pragma acc update device(connecHEXA_SOD[0:nelem_local*nnode])
 
-    std::cout << "Converting HEXA connectivity to SOD format..." << std::endl;
-    conv.convert2sod_HEXA( porder, nelem, nnode, connecHEXA, connecHEXA_SOD );
-    #pragma acc update host(connecHEXA_SOD[0:nelem*nnode])
+    if (mpi_rank == 0) std::cout << "Converting HEXA connectivity to SOD format..." << std::endl;
+    conv.convert2sod_HEXA( porder, nelem_local, nnode, connecHEXA, connecHEXA_SOD );
+    #pragma acc update host(connecHEXA_SOD[0:nelem_local*nnode])
 
     // Create a dataset for the HEXA connectivity table
     data2d[0] = nelem;
     data2d[1] = nnode;
 
     dataspace = H5Screate_simple( 2, data2d, NULL );
-    dataset = H5Dcreate( fileOut, "/connec", H5T_STD_I64LE, dataspace, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT );
+    plist_id = H5Pcreate( H5P_DATASET_CREATE );
+    dataset = H5Dcreate( fileOut, "/connec", H5T_STD_I64LE, dataspace, H5P_DEFAULT, plist_id, H5P_DEFAULT );
+    H5Pclose( plist_id );
+
+    // Each rank writes its own connecHEXA_SOD array to the dataset: use hyperslab
+
+    // Create the memory dataspace
+    count[0] = nelem_local;
+    count[1] = nnode;
+    offset[0] = irmin-1;
+    offset[1] = 0;
+    memspace_id = H5Screate_simple( 2, count, NULL );
+    filespace_id = H5Dget_space( dataset );
+    H5Sselect_hyperslab( filespace_id, H5S_SELECT_SET, offset, NULL, count, NULL );
+
+    // Create the dataset transfer property
+    plist_id = H5Pcreate( H5P_DATASET_XFER );
+    H5Pset_dxpl_mpio( plist_id, H5FD_MPIO_COLLECTIVE );
 
     // Write the HEXA connectivity table
-    status_hdf = H5Dwrite( dataset, H5T_NATIVE_LLONG, H5S_ALL, H5S_ALL, H5P_DEFAULT, connecHEXA_SOD );
+    status_hdf = H5Dwrite( dataset, H5T_STD_I64LE, memspace_id, filespace_id, plist_id, connecHEXA_SOD );
+    H5Pclose( plist_id );
+    H5Sclose( memspace_id );
+    H5Sclose( filespace_id );
 
     // Close the dataset and dataspace
     status_hdf = H5Dclose( dataset );
@@ -338,17 +427,18 @@ int main( int argc, char *argv[] )
     std::cout << "Reading boundary element connectivity..." << std::endl;
 
     istart = 0;
-    uint64_t *belemId = new uint64_t[nbelem];           // Boundary element ID
-    cgsize_t *connecQUAD = new cgsize_t[nbelem*nbnode]; // Total BC connectivity
-    #pragma acc enter data create (connecQUAD[0:nbelem*nbnode])
+    uint64_t *belemId_g = new uint64_t[nbelem];           // Boundary element ID
+    cgsize_t *connecQUAD_g = new cgsize_t[nbelem*nbnode]; // Total BC connectivity
+    #pragma acc enter data create (connecQUAD_g[0:nbelem*nbnode], belemId_g[0:nbelem])
 
     for ( int idx_sec = 2; idx_sec <= nsections; idx_sec++ )
     {
         printf("Reading section %d ...\n", idx_sec);
         // belemId is simply idxSec-1
+        #pragma acc parallel loop present(belemId_g[0:nbelem])
         for ( int i = istart; i < istart+nbelem_sec[idx_sec-1]; i++ )
         {
-            belemId[i] = idx_sec-1;
+            belemId_g[i] = idx_sec-1;
         }
 
         // Alloc. a buffer for the current BC connectivity
@@ -360,12 +450,12 @@ int main( int argc, char *argv[] )
         #pragma acc update device(connecQUAD_sec[0:nbelem_sec[idx_sec-1]*nbnode])
 
         // Copy to the total BC connectivity
-        #pragma acc parallel loop gang vector
+        #pragma acc parallel loop gang vector collapse(2) present(connecQUAD_g[0:nbelem*nbnode], connecQUAD_sec[0:nbelem_sec[idx_sec-1]*nbnode])
         for ( int i = 0; i < nbelem_sec[idx_sec-1]; i++ )
         {
             for ( int j = 0; j < nbnode; j++ )
             {
-                connecQUAD[(istart+i)*nbnode+j] = connecQUAD_sec[i*nbnode+j];
+                connecQUAD_g[(istart+i)*nbnode+j] = connecQUAD_sec[i*nbnode+j];
             }
         }
         istart += nbelem_sec[idx_sec-1];
@@ -374,18 +464,61 @@ int main( int argc, char *argv[] )
         delete[] connecQUAD_sec;
         #pragma acc exit data delete (connecQUAD_sec)
     }
-    #pragma acc update host(connecQUAD[0:nbelem*nbnode])
+    #pragma acc update host(connecQUAD_g[0:nbelem*nbnode], belemId_g[0:nbelem])
+
+    // Partition the boundary connectivity
+    ratio = (float)nbelem / (float)mpi_nprocs;
+    uint64_t nbelem_local;
+    uint64_t lbepr[mpi_nprocs];
+    {
+        uint64_t aux = (uint64_t)ratio;
+        if (ratio - aux > 0.5) aux++;
+        for (int i = 0; i < mpi_nprocs; i++)
+        {
+            lbepr[i] = aux;
+        }
+        lbepr[mpi_nprocs-1] = nbelem - (mpi_nprocs-1)*aux;
+        nbelem_local = lbepr[mpi_rank];
+    }
+    uint64_t *belemId = new uint64_t[nbelem_local];
+    cgsize_t *connecQUAD = new cgsize_t[nbelem_local*nbnode];
+    #pragma acc enter data create (connecQUAD[0:nbelem_local*nbnode], belemId[0:nbelem_local])
+    memset( belemId, 0, nbelem_local*sizeof(uint64_t) );
+    memset( connecQUAD, 0, nbelem_local*nbnode*sizeof(cgsize_t) );
+
+    // Lower and upper range indexes for each rank
+    if (mpi_rank == 0)
+    {
+        irmin = 1;
+        irmax = lbepr[0];
+    }
+    else
+    {
+        irmin = lbepr[mpi_rank-1]*mpi_rank + 1;
+        irmax = lbepr[mpi_rank] + irmin - 1;
+    }
+
+    // Copy the boundary connectivity to the local arrays
+    for ( uint64_t i = 0; i < nbelem_local; i++ )
+    {
+        belemId[i] = belemId_g[irmin-1+i];
+        for ( int j = 0; j < nbnode; j++ )
+        {
+            connecQUAD[i*nbnode+j] = connecQUAD_g[(irmin-1+i)*nbnode+j];
+        }
+    }
+    #pragma acc update device(belemId[0:nbelem_local], connecQUAD[0:nbelem_local*nbnode])
 
     // Convert to SOD format
-    cgsize_t *connecQUAD_SOD = new cgsize_t[nbelem*nbnode];
-    #pragma acc enter data create (connecQUAD_SOD[0:nbelem*nbnode])
+    cgsize_t *connecQUAD_SOD = new cgsize_t[nbelem_local*nbnode];
+    #pragma acc enter data create (connecQUAD_SOD[0:nbelem_local*nbnode])
     if ( nbound > 0 )
     {
-        memset( connecQUAD_SOD, 0, nbelem*nbnode*sizeof(cgsize_t) );
-        #pragma acc update device(connecQUAD_SOD[0:nbelem*nbnode])
+        memset( connecQUAD_SOD, 0, nbelem_local*nbnode*sizeof(cgsize_t) );
+        #pragma acc update device(connecQUAD_SOD[0:nbelem_local*nbnode])
 
         std::cout << "Converting QUAD connectivity to SOD format..." << std::endl;
-        conv.convert2sod_QUAD( porder, nbelem, nbnode, connecQUAD, connecQUAD_SOD );
+        conv.convert2sod_QUAD( porder, nbelem_local, nbnode, connecQUAD, connecQUAD_SOD );
     }
 
     // Create a dataset for the bounndary connectivity table
@@ -393,10 +526,29 @@ int main( int argc, char *argv[] )
     data2d[1] = nbnode;
 
     dataspace = H5Screate_simple( 2, data2d, NULL );
-    dataset = H5Dcreate( fileOut, "/boundFaces", H5T_STD_I64LE, dataspace, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT );
+    plist_id = H5Pcreate( H5P_DATASET_CREATE );
+    dataset = H5Dcreate( fileOut, "/boundFaces", H5T_STD_I64LE, dataspace, H5P_DEFAULT, plist_id, H5P_DEFAULT );
+    H5Pclose( plist_id );
+
+    // Each rank writes its own connecQUAD_SOD array to the dataset: use hyperslab
+    count[0] = nbelem_local;
+    count[1] = nbnode;
+    offset[0] = irmin-1;
+    offset[1] = 0;
+    memspace_id = H5Screate_simple( 2, count, NULL );
+    filespace_id = H5Dget_space( dataset );
+    H5Sselect_hyperslab( filespace_id, H5S_SELECT_SET, offset, NULL, count, NULL );
+
+    // Create the dataset transfer property
+    plist_id = H5Pcreate( H5P_DATASET_XFER );
+    H5Pset_dxpl_mpio( plist_id, H5FD_MPIO_COLLECTIVE );
 
     // Write the boundary connectivity table
-    status_hdf = H5Dwrite( dataset, H5T_NATIVE_LLONG, H5S_ALL, H5S_ALL, H5P_DEFAULT, connecQUAD_SOD );
+    status_hdf = H5Dwrite( dataset, H5T_STD_I64LE, memspace_id, filespace_id, plist_id, connecQUAD_SOD );
+    //status_hdf = H5Dwrite( dataset, H5T_NATIVE_LLONG, H5S_ALL, H5S_ALL, H5P_DEFAULT, connecQUAD_SOD );
+    H5Pclose( plist_id );
+    H5Sclose( memspace_id );
+    H5Sclose( filespace_id );
 
     // Close the dataset and dataspace
     status_hdf = H5Dclose( dataset );
@@ -414,10 +566,26 @@ int main( int argc, char *argv[] )
     data1d[0] = nbelem;
 
     dataspace = H5Screate_simple( 1, data1d, NULL );
-    dataset = H5Dcreate( fileOut, "/boundFacesId", H5T_STD_I64LE, dataspace, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT );
+    plist_id = H5Pcreate( H5P_DATASET_CREATE );
+    dataset = H5Dcreate( fileOut, "/boundFacesId", H5T_STD_I64LE, dataspace, H5P_DEFAULT, plist_id, H5P_DEFAULT );
+    H5Pclose( plist_id );
+
+    // Each rank writes its own belemId array to the dataset: use hyperslab
+    count[0] = nbelem_local;
+    offset[0] = irmin-1;
+    memspace_id = H5Screate_simple( 1, count, NULL );
+    filespace_id = H5Dget_space( dataset );
+    H5Sselect_hyperslab( filespace_id, H5S_SELECT_SET, offset, NULL, count, NULL );
+
+    // Create the dataset transfer property
+    plist_id = H5Pcreate( H5P_DATASET_XFER );
+    H5Pset_dxpl_mpio( plist_id, H5FD_MPIO_COLLECTIVE );
 
     // Write the boundary element ID
-    status_hdf = H5Dwrite( dataset, H5T_NATIVE_LLONG, H5S_ALL, H5S_ALL, H5P_DEFAULT, belemId );
+    status_hdf = H5Dwrite( dataset, H5T_STD_I64LE, memspace_id, filespace_id, plist_id, belemId );
+    H5Pclose( plist_id );
+    H5Sclose( memspace_id );
+    H5Sclose( filespace_id );
 
     // Close the dataset and dataspace
     status_hdf = H5Dclose( dataset );
