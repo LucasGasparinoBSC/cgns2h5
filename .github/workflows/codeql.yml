@@ -82,8 +82,8 @@ jobs:
       run: |
         source /home/lucas/environment-modules/5.2.0/init/bash
         module load hdf5/1.14.4 cgns/4.4.0
-        cmake -B ${{github.workspace}}/build-codeql
-        cd ${{github.workspace}}/build-codeql
+        make -p ${{github.workspace}}/build-codeql && cd ${{github.workspace}}/build-codeql
+        cmake ..
         make
 
     - name: Perform CodeQL Analysis
