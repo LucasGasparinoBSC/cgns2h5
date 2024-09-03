@@ -82,8 +82,9 @@ jobs:
       run: |
         source /home/lucas/environment-modules/5.2.0/init/bash
         module load hdf5/1.14.4 cgns/4.4.0
-        cmake -B ${{github.workspace}}/build -DCMAKE_BUILD_TYPE=Release -GNinja
-        cmake --build ${{github.workspace}}/build --config Release
+        cmake -B ${{github.workspace}}/build-codeql
+        cd ${{github.workspace}}/build-codeql
+        make
 
     - name: Perform CodeQL Analysis
       uses: github/codeql-action/analyze@v3
