@@ -7,6 +7,8 @@ on:
     branches: [ "main" ]
 env:
     BUILD_TYPE: Release
+    # Use Fish terminal instead of Bash
+    SHELL: /usr/bin/fish
 
 jobs:
   build:
