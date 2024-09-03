@@ -82,7 +82,7 @@ jobs:
       run: |
         source /home/lucas/environment-modules/5.2.0/init/bash
         module load hdf5/1.14.4 cgns/4.4.0
-        make -p ${{github.workspace}}/build-codeql && cd ${{github.workspace}}/build-codeql
+        mkdir -p ${{github.workspace}}/build-codeql && cd ${{github.workspace}}/build-codeql
         cmake ..
         make
 
