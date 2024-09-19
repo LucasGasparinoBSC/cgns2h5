@@ -94,7 +94,7 @@ class Conversor
         int** createHexaIndexTable( int &mOrder, int &opt );
         int** createQuadIJ( int &mOrder, int** &indexTable);
         int*** createHexaIJK( int &mOrder, int** &indexTable );
-        void joinTables( int &indexDesti, int* size1, int** &table1, int* size2, int** &table2 );
+        void joinTables( int &indexDesti, int* size1, int** &table1, int** &table2 );
     public:
         // Empty constructor
         Conversor();

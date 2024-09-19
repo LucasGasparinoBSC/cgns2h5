@@ -24,7 +24,6 @@ int** Conversor::createHexaIndexTable( int &mOrder, int &opt )
 {
     // Allocate memory for the index table
     int nNodes = (mOrder+1) * (mOrder+1) * (mOrder+1);
-    int tableSize[2] = {nNodes, 3};
     int **indexTable = new int*[nNodes];
     for ( int i = 0; i < nNodes; i++ )
     {
@@ -184,7 +183,7 @@ int** Conversor::createHexaIndexTable( int &mOrder, int &opt )
             }
 
             // Join tableVol to indexTable
-            joinTables( iNode, sizeVol, tableVol, tableSize, indexTable );
+            joinTables( iNode, sizeVol, tableVol, indexTable );
         }
     }
     return indexTable;
@@ -204,7 +203,6 @@ int** Conversor::createQuadIndexTable( int &mOrder, int &opt )
 {
     // Allocate memory for the index table
     int nNodes = (mOrder+1)*(mOrder+1);
-    int tableSize[2] = {nNodes, 2};
     int **indexTable = new int*[nNodes];
     for ( int i = 0; i < nNodes; i++ )
     {
@@ -283,13 +281,13 @@ int** Conversor::createQuadIndexTable( int &mOrder, int &opt )
             }
 
             // Join tableFace to indexTable
-            joinTables( iNode, sizeFace, tableFace, tableSize, indexTable );
+            joinTables( iNode, sizeFace, tableFace, indexTable );
         }
     }
     return indexTable;
 }
 
-void Conversor::joinTables( int &indexDesti, int* size1, int** &table1, int* size2, int** &table2 )
+void Conversor::joinTables( int &indexDesti, int* size1, int** &table1, int** &table2 )
 {
     int j = indexDesti;
     for ( int i = 0; i < size1[0]; i++ )
@@ -374,8 +372,8 @@ void Conversor::convert2sod_QUAD( int &pOrder, uint64_t &nElem, int &nNode, cgsi
     sod2d_QuadIJ = createQuadIJ( pOrder, this->sod2d_QuadIndexTable );
 
     // Loop over all elements
-    cgsize_t connec[nNode];
-    cgsize_t connecConv[nNode];
+    cgsize_t *connec = new cgsize_t[nNode];
+    cgsize_t *connecConv = new cgsize_t[nNode];
     int i;
     int j;
     int iNodeSOD2D;
@@ -411,6 +409,8 @@ void Conversor::convert2sod_QUAD( int &pOrder, uint64_t &nElem, int &nNode, cgsi
             connecBoundSOD2D[iElem*nNode+iNode] = connecConv[iNode];
         }
     }
+    delete[] connec;
+    delete[] connecConv;
 }
 
 void Conversor::convert2sod_HEXA( int &pOrder, uint64_t &nElem, int &nNode, cgsize_t* connecCGNS, cgsize_t* connecSOD2D )
@@ -426,8 +426,8 @@ void Conversor::convert2sod_HEXA( int &pOrder, uint64_t &nElem, int &nNode, cgsi
     sod2d_HexaIJK = createHexaIJK( pOrder, this->sod2d_HexaIndexTable );
 
     // Loop over all elements
-    cgsize_t connec[nNode];
-    cgsize_t connecConv[nNode];
+    cgsize_t *connec = new cgsize_t[nNode];
+    cgsize_t *connecConv = new cgsize_t[nNode];
     int i;
     int j;
     int k;
@@ -484,4 +484,6 @@ void Conversor::convert2sod_HEXA( int &pOrder, uint64_t &nElem, int &nNode, cgsi
             connecSOD2D[iElem*nNode+iNode] = connecConv[iNode];
         }
     }
+    delete[] connec;
+    delete[] connecConv;
 }

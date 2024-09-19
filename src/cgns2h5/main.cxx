@@ -28,7 +28,6 @@
 // Element Type processor
 #include "cgnsElemInfo.h"
 #include "Conversor.h"
-#include "H5Writer.h"
 
 int main( int argc, char *argv[] )
 {
@@ -133,7 +132,7 @@ int main( int argc, char *argv[] )
 
     // Compute nodes per rank
     float ratio = (float)npoin / (float)mpi_nprocs;
-    int npoin_local;
+    uint64_t npoin_local;
     int lnpr[mpi_nprocs];
     {
         int aux = (int)ratio;
@@ -223,7 +222,7 @@ int main( int argc, char *argv[] )
 
     // Create the memory dataspace
     hsize_t count[2] = {npoin_local, 3};
-    hsize_t offset[2] = {irmin-1, 0};
+    hsize_t offset[2] = {hsize_t(irmin)-1, 0};
     hid_t memspace_id = H5Screate_simple( 2, count, NULL );
     hid_t filespace_id = H5Dget_space( dataset );
     H5Sselect_hyperslab( filespace_id, H5S_SELECT_SET, offset, NULL, count, NULL );
@@ -234,6 +233,15 @@ int main( int argc, char *argv[] )
 
     // Write the data to the dataset
     status_hdf = H5Dwrite( dataset, H5T_IEEE_F64LE, memspace_id, filespace_id, plist_id, xyz );
+    if ( status_hdf < 0 )
+    {
+        if ( mpi_rank == 0 )
+        {
+            std::cerr << "Error: Cannot write coordinates to HDF5 file" << std::endl;
+        }
+        MPI_Abort( MPI_COMM_WORLD, 1 );
+        return 1;
+    }
     H5Pclose( plist_id );
     H5Sclose( memspace_id );
     H5Sclose( filespace_id );
@@ -319,10 +327,10 @@ int main( int argc, char *argv[] )
             printf("  Polynomial order: %d\n", porder);
             printf("  Element dimension: %d\n", eldim);
             printf("  Boundary info:\n");
-            printf("    Start: %d, End: %d\n", belemStartEnd[indx_sec-1][0], belemStartEnd[indx_sec-1][1]);
+            printf("    Start: %lu, End: %lu\n", belemStartEnd[indx_sec-1][0], belemStartEnd[indx_sec-1][1]);
             printf("    Number of boundary elements: %ld\n", nbelem_sec[indx_sec-1]);
             printf("  Element info:\n");
-            printf("    Start: %d, End: %d\n", elemStartEnd[indx_sec-1][0], elemStartEnd[indx_sec-1][1]);
+            printf("    Start: %lu, End: %lu\n", elemStartEnd[indx_sec-1][0], elemStartEnd[indx_sec-1][1]);
             printf("    Number of elements: %ld\n", nelem_sec[indx_sec-1]);
         }
     }
@@ -436,7 +444,7 @@ int main( int argc, char *argv[] )
         printf("Reading section %d ...\n", idx_sec);
         // belemId is simply idxSec-1
         #pragma acc parallel loop present(belemId_g[0:nbelem])
-        for ( int i = istart; i < istart+nbelem_sec[idx_sec-1]; i++ )
+        for ( uint64_t i = istart; i < istart+nbelem_sec[idx_sec-1]; i++ )
         {
             belemId_g[i] = idx_sec-1;
         }
@@ -451,7 +459,7 @@ int main( int argc, char *argv[] )
 
         // Copy to the total BC connectivity
         #pragma acc parallel loop gang vector collapse(2) present(connecQUAD_g[0:nbelem*nbnode], connecQUAD_sec[0:nbelem_sec[idx_sec-1]*nbnode])
-        for ( int i = 0; i < nbelem_sec[idx_sec-1]; i++ )
+        for ( uint64_t i = 0; i < nbelem_sec[idx_sec-1]; i++ )
         {
             for ( int j = 0; j < nbnode; j++ )
             {
@@ -691,7 +699,7 @@ int main( int argc, char *argv[] )
     dataset = H5Dcreate( fileOut, "/mappedFaces", H5T_STD_I64LE, dataspace, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT );
 
     // Write the mapped faces (empty for now)
-    uint64_t *mappedFaces;
+    uint64_t *mappedFaces = NULL;
     if ( numMappedFaces > 0 )
     {
         status_hdf = H5Dwrite( dataset, H5T_NATIVE_LLONG, H5S_ALL, H5S_ALL, H5P_DEFAULT, mappedFaces );
@@ -709,7 +717,7 @@ int main( int argc, char *argv[] )
     dataset = H5Dcreate( fileOut, "/periodicFaces", H5T_STD_I64LE, dataspace, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT );
 
     // Write the periodic faces (empty for now)
-    uint64_t *periodicFaces;
+    uint64_t *periodicFaces = NULL;
     if ( numPeriodicFaces > 0 )
     {
         status_hdf = H5Dwrite( dataset, H5T_NATIVE_LLONG, H5S_ALL, H5S_ALL, H5P_DEFAULT, periodicFaces );
@@ -723,7 +731,7 @@ int main( int argc, char *argv[] )
     dataset = H5Dcreate( fileOut, "/periodicLinks", H5T_STD_I64LE, dataspace, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT );
 
     // Write the periodic links (empty for now)
-    uint64_t *periodicLinks;
+    uint64_t *periodicLinks = NULL;
     if ( numPeriodicLinks > 0 )
     {
         status_hdf = H5Dwrite( dataset, H5T_NATIVE_LLONG, H5S_ALL, H5S_ALL, H5P_DEFAULT, periodicLinks );

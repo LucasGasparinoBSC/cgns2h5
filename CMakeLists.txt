@@ -12,19 +12,17 @@ set(ENV{CXX} "mpicxx")
 # CMake extra file are on this path
 set(CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
 
-# Include the extra file
-include(gpu)
-
 project(tool_cgns2h5 LANGUAGES C CXX)
 
-# Find HDF5
-find_package(HDF5 REQUIRED COMPONENTS C HL)
+# Include CMake functions
+include(gpu)
+include(mpi)
+include(hdf5)
+include(cgns)
 
-# Find CGNS
-find_package(CGNS REQUIRED)
-
-# Set CMake standard
-set(CMAKE_C_STANDARD 17)
+# Set C and CXX standards
+set(CMAKE_C_STANDARD 20)
+set(CMAKE_CXX_STANDARD 20)
 
 # Set libraries to shared
 set(LIBRARY_TYPE SHARED)
@@ -53,11 +51,24 @@ elseif(CMAKE_C_COMPILER_ID STREQUAL "GNU")
     set(CMAKE_C_FLAGS "-fopenmp")
     set(CMAKE_CXX_FLAGS "-fopenmp")
     # Debug flags
-    set(CMAKE_C_FLAGS_DEBUG "-g -O0 -Wall -Wextra -Wpedantic -Werror")
-    set(CMAKE_CXX_FLAGS_DEBUG "-g -O0 -Wall -Wextra -Wpedantic -Werror")
+    set(CMAKE_C_FLAGS_DEBUG "-g -O0 -Wall -Wextra -Wpedantic -Werror -Wno-unknown-pragmas -Wno-vla")
+    set(CMAKE_CXX_FLAGS_DEBUG "-g -O0 -Wall -Wextra -Wpedantic -Werror -Wno-unknown-pragmas -Wno-vla")
     # Release flags
     set(CMAKE_C_FLAGS_RELEASE "-O3")
     set(CMAKE_CXX_FLAGS_RELEASE "-O3")
+elseif(CMAKE_C_COMPILER_ID STREQUAL "Intel" OR CMAKE_C_COMPILER_ID STREQUAL "IntelLLVM")
+	message("-- Intel compiler detected")
+	# Common Intel+MPI flags
+	set(CMAKE_C_FLAGS "")
+	set(CMAKE_CXX_FLAGS "")
+	# Debug
+	set(CMAKE_C_FLAGS_DEBUG "-g -O0 -debug all")
+	set(CMAKE_CXX_FLAGS_DEBUG "-g -O0 -debug all")
+	# Release
+	set(CMAKE_C_FLAGS_RELEASE "-O3 -xHost")
+	set(CMAKE_CXX_FLAGS_RELEASE "-O3 -xHost")
+else()
+    message(FATAL_ERROR "Compiler not supported")
 endif()
 
 # use, i.e. don't skip the full RPATH for the build tree
