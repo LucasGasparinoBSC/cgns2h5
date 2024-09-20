@@ -119,23 +119,24 @@ int main( int argc, char *argv[] )
         MPI_Abort( MPI_COMM_WORLD, 1 );
         return 1;
     }
+    MPI_Barrier( MPI_COMM_WORLD );
     uint64_t npoin = zone_size[0][0]; // Number of grid nodes
     uint64_t nelem = zone_size[0][1]; // Number of elements
     uint64_t nface = zone_size[0][2]; // TODO: Need better name for this
     if ( mpi_rank == 0 )
     {
         printf("Zone name: %s\n", zone_name);
-        printf("Number of points: %ld\n", npoin);
-        printf("Number of elements: %ld\n", nelem);
-        printf("Number of faces: %ld\n", nface);
+        printf("Number of points: %lu\n", npoin);
+        printf("Number of elements: %lu\n", nelem);
+        printf("Number of faces: %lu\n", nface);
     }
 
     // Compute nodes per rank
     float ratio = (float)npoin / (float)mpi_nprocs;
     uint64_t npoin_local;
-    int lnpr[mpi_nprocs];
+    uint64_t lnpr[mpi_nprocs];
     {
-        int aux = (int)ratio;
+        u_int64_t aux = (uint64_t)ratio;
         if (ratio - aux > 0.5) aux++;
         for (int i = 0; i < mpi_nprocs; i++)
         {
@@ -150,6 +151,7 @@ int main( int argc, char *argv[] )
     double *tmp = new double[npoin_local];
     double *xyz = new double[npoin_local*3];
     #pragma acc enter data create (tmp[0:npoin_local], xyz[0:npoin_local*3])
+    MPI_Barrier( MPI_COMM_WORLD );
 
     // Lower and upper range indexes for each rank
     if (mpi_rank == 0)
@@ -159,8 +161,8 @@ int main( int argc, char *argv[] )
     }
     else
     {
-        irmin = lnpr[mpi_rank-1]*mpi_rank + 1;
-        irmax = lnpr[mpi_rank] + irmin - 1;
+        irmin = (cgsize_t)lnpr[mpi_rank-1] * (cgsize_t)mpi_rank + 1;
+        irmax = (cgsize_t)lnpr[mpi_rank] + irmin - 1;
     }
 
     printf("Rank %d: irmin = %ld, irmax = %ld\n", mpi_rank, irmin, irmax);
@@ -180,6 +182,8 @@ int main( int argc, char *argv[] )
         return 1;
     }
 
+    float tstart, tend;
+    tstart = MPI_Wtime();
     cg_coord_read( cgns_file, idx_Base, idx_Zone, "CoordinateX",
                    CGNS_ENUMV(RealDouble), &irmin, &irmax, tmp );
     #pragma acc update device(tmp[0:npoin])
@@ -188,6 +192,7 @@ int main( int argc, char *argv[] )
     {
         xyz[i*3 + 0] = scale_factor * tmp[i];
     }
+    MPI_Barrier( MPI_COMM_WORLD );
 
     cg_coord_read( cgns_file, idx_Base, idx_Zone, "CoordinateY",
                    CGNS_ENUMV(RealDouble), &irmin, &irmax, tmp );
@@ -197,6 +202,8 @@ int main( int argc, char *argv[] )
     {
         xyz[i*3 + 1] = scale_factor * tmp[i];
     }
+    MPI_Barrier( MPI_COMM_WORLD );
+
     cg_coord_read( cgns_file, idx_Base, idx_Zone, "CoordinateZ",
                    CGNS_ENUMV(RealDouble), &irmin, &irmax, tmp );
     #pragma acc update device(tmp[0:npoin])
@@ -206,7 +213,13 @@ int main( int argc, char *argv[] )
         xyz[i*3 + 2] = scale_factor * tmp[i];
     }
     #pragma acc update host(xyz[0:npoin*3])
+    MPI_Barrier( MPI_COMM_WORLD );
 
+    tend = MPI_Wtime();
+    if ( mpi_rank == 0 )
+    {
+        printf("Time to read and scale coordinates: %f\n", tend - tstart);
+    }
     MPI_Barrier( MPI_COMM_WORLD );
 
     // Create a dataset for the coordinates
@@ -261,15 +274,15 @@ int main( int argc, char *argv[] )
     if ( mpi_rank == 0 ) printf("Number of sections: %d\n", nsections);
 
     // Extract basic info from each section
-    int nnode_sec[nsections];             // Nodes/elem. in each section
-    uint64_t nelem_sec[nsections];        // Number of elements in each section
-    uint64_t nbelem_sec[nsections];       // Boundary elem. iin each section
-    cgsize_t elemStartEnd[nsections][2];  // Element start and end in each section
-    cgsize_t belemStartEnd[nsections][2]; // Boundary elem. start and end in each section
-    int ibound;                           // Boundary index
-    int snode, nnode, nbnode, porder, eldim;     // Element info
-    int nbound = 0;                       // Total number of physical boundaries
-    uint64_t nbelem = 0;                  // Total number of boundary elements
+    int nnode_sec[nsections];                // Nodes/elem. in each section
+    uint64_t nelem_sec[nsections];           // Number of elements in each section
+    uint64_t nbelem_sec[nsections];          // Boundary elem. iin each section
+    cgsize_t elemStartEnd[nsections][2];     // Element start and end in each section
+    cgsize_t belemStartEnd[nsections][2];    // Boundary elem. start and end in each section
+    int ibound;                              // Boundary index
+    int snode, nnode, nbnode, porder, eldim; // Element info
+    int nbound = 0;                          // Total number of physical boundaries
+    uint64_t nbelem = 0;                     // Total number of boundary elements
     CGNS_ENUMT(ElementType_t) itype;
     int iparent_flag;
 
@@ -320,6 +333,8 @@ int main( int argc, char *argv[] )
             nnode_sec[indx_sec-1] = nnode;
         }
 
+        MPI_Barrier( MPI_COMM_WORLD );
+
         // Print section info
         if ( mpi_rank == 0 )
         {
@@ -341,8 +356,10 @@ int main( int argc, char *argv[] )
         printf("Total number of boundary elements: %ld\n", nbelem);
     }
 
+    MPI_Barrier( MPI_COMM_WORLD );
+
     // Get the HEXA connectivity (only works for Xevi cases, asssumes 1st section is HEXA)
-    std::cout << "Reading HEXA connectivity..." << std::endl;
+    if (mpi_rank == 0) std::cout << "Reading HEXA connectivity..." << std::endl;
 
     // Compute elements per rank
     ratio = (float)nelem / (float)mpi_nprocs;
@@ -355,7 +372,7 @@ int main( int argc, char *argv[] )
         {
             lepr[i] = aux;
         }
-        lepr[mpi_nprocs-1] = nelem - (mpi_nprocs-1)*aux;
+        lepr[mpi_nprocs-1] = nelem - ((uint64_t)mpi_nprocs-1)*aux;
         nelem_local = lepr[mpi_rank];
     }
 
@@ -363,7 +380,7 @@ int main( int argc, char *argv[] )
     if (mpi_rank == 0)
     {
         irmin = 1;
-        irmax = lepr[0];
+        irmax = (cgsize_t)lepr[0];
     }
     else
     {
@@ -371,15 +388,26 @@ int main( int argc, char *argv[] )
         irmax = lepr[mpi_rank] + irmin - 1;
     }
 
+    MPI_Barrier( MPI_COMM_WORLD );
+
     // Allocate data for the connectivity table
     cgsize_t iparent_data;
     cgsize_t *connecHEXA = new cgsize_t[nelem_local*nnode];
     #pragma acc enter data create (connecHEXA[0:nelem_local*nnode])
 
     // Read the connectivity
+    tstart = MPI_Wtime();
     cgp_elements_read_data(cgns_file, idx_Base, idx_Zone, 1, irmin, irmax, connecHEXA);
     //cg_elements_read( cgns_file, idx_Base, idx_Zone, 1, connecHEXA, &iparent_data );
     #pragma acc update device(connecHEXA[0:nelem_local*nnode])
+
+    tend = MPI_Wtime();
+    if ( mpi_rank == 0 )
+    {
+        printf("Time to read HEXA connectivity: %f\n", tend - tstart);
+    }
+
+    MPI_Barrier( MPI_COMM_WORLD );
 
     // Convert to SOD format
     Conversor conv;
@@ -391,6 +419,8 @@ int main( int argc, char *argv[] )
     if (mpi_rank == 0) std::cout << "Converting HEXA connectivity to SOD format..." << std::endl;
     conv.convert2sod_HEXA( porder, nelem_local, nnode, connecHEXA, connecHEXA_SOD );
     #pragma acc update host(connecHEXA_SOD[0:nelem_local*nnode])
+
+    MPI_Barrier( MPI_COMM_WORLD );
 
     // Create a dataset for the HEXA connectivity table
     data2d[0] = nelem;
@@ -431,17 +461,21 @@ int main( int argc, char *argv[] )
     delete[] connecHEXA_SOD;
     #pragma acc exit data delete (connecHEXA, connecHEXA_SOD)
 
+    MPI_Barrier( MPI_COMM_WORLD );
+
     // Remaining sections are BCs, read them. Also create belemId array
-    std::cout << "Reading boundary element connectivity..." << std::endl;
+    if (mpi_rank == 0) std::cout << "Reading boundary element connectivity..." << std::endl;
 
     istart = 0;
     uint64_t *belemId_g = new uint64_t[nbelem];           // Boundary element ID
     cgsize_t *connecQUAD_g = new cgsize_t[nbelem*nbnode]; // Total BC connectivity
     #pragma acc enter data create (connecQUAD_g[0:nbelem*nbnode], belemId_g[0:nbelem])
 
+    MPI_Barrier( MPI_COMM_WORLD );
+
     for ( int idx_sec = 2; idx_sec <= nsections; idx_sec++ )
     {
-        printf("Reading section %d ...\n", idx_sec);
+        if (mpi_rank == 0) printf("Reading section %d ...\n", idx_sec);
         // belemId is simply idxSec-1
         #pragma acc parallel loop present(belemId_g[0:nbelem])
         for ( uint64_t i = istart; i < istart+nbelem_sec[idx_sec-1]; i++ )
@@ -474,6 +508,8 @@ int main( int argc, char *argv[] )
     }
     #pragma acc update host(connecQUAD_g[0:nbelem*nbnode], belemId_g[0:nbelem])
 
+    MPI_Barrier( MPI_COMM_WORLD );
+
     // Partition the boundary connectivity
     ratio = (float)nbelem / (float)mpi_nprocs;
     uint64_t nbelem_local;
@@ -485,7 +521,7 @@ int main( int argc, char *argv[] )
         {
             lbepr[i] = aux;
         }
-        lbepr[mpi_nprocs-1] = nbelem - (mpi_nprocs-1)*aux;
+        lbepr[mpi_nprocs-1] = nbelem - ((uint64_t)mpi_nprocs-1)*aux;
         nbelem_local = lbepr[mpi_rank];
     }
     uint64_t *belemId = new uint64_t[nbelem_local];
@@ -517,6 +553,8 @@ int main( int argc, char *argv[] )
     }
     #pragma acc update device(belemId[0:nbelem_local], connecQUAD[0:nbelem_local*nbnode])
 
+    MPI_Barrier( MPI_COMM_WORLD );
+
     // Convert to SOD format
     cgsize_t *connecQUAD_SOD = new cgsize_t[nbelem_local*nbnode];
     #pragma acc enter data create (connecQUAD_SOD[0:nbelem_local*nbnode])
@@ -528,6 +566,8 @@ int main( int argc, char *argv[] )
         std::cout << "Converting QUAD connectivity to SOD format..." << std::endl;
         conv.convert2sod_QUAD( porder, nbelem_local, nbnode, connecQUAD, connecQUAD_SOD );
     }
+
+    MPI_Barrier( MPI_COMM_WORLD );
 
     // Create a dataset for the bounndary connectivity table
     data2d[0] = nbelem;
