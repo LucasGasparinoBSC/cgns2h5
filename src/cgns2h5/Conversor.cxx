@@ -99,7 +99,7 @@ int** Conversor::createHexaIndexTable( int &mOrder, int &opt )
                     case 2:
                         i0 = sod2d_HexaEdges[iedge][0];
                         i1 = sod2d_HexaEdges[iedge][1];
-                        break;
+                    break;
                 }
 
                 // Subtract the indexTable of the end nodes, normalize with mOrder

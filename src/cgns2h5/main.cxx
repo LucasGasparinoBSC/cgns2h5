@@ -563,7 +563,7 @@ int main( int argc, char *argv[] )
         memset( connecQUAD_SOD, 0, nbelem_local*nbnode*sizeof(cgsize_t) );
         #pragma acc update device(connecQUAD_SOD[0:nbelem_local*nbnode])
 
-        std::cout << "Converting QUAD connectivity to SOD format..." << std::endl;
+        if (mpi_rank == 0) std::cout << "Converting QUAD connectivity to SOD format..." << std::endl;
         conv.convert2sod_QUAD( porder, nbelem_local, nbnode, connecQUAD, connecQUAD_SOD );
     }
 
